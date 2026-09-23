@@ -40,6 +40,11 @@ class RelayConfigStore(context: Context) {
         get() = prefs.getBoolean(KEY_SCOPE, true)
         set(value) = prefs.edit().putBoolean(KEY_SCOPE, value).apply()
 
+    /** Whether the in-game HUD was left switched on. */
+    var hudEnabled: Boolean
+        get() = prefs.getBoolean(KEY_HUD, false)
+        set(value) = prefs.edit().putBoolean(KEY_HUD, value).apply()
+
     /** Server currently being relayed; a blank host means "no target chosen yet". */
     fun target(): ServerTarget = ServerTarget(host = host, port = port)
 
@@ -96,6 +101,7 @@ class RelayConfigStore(context: Context) {
         private const val KEY_PORT = "port"
         private const val KEY_SCOPE = "scope_to_server"
         private const val KEY_RECENTS = "recents"
+        private const val KEY_HUD = "hud_enabled"
 
         /** The Bedrock package on Android; the beta program replaces this same app. */
         const val DEFAULT_PACKAGE = "com.mojang.minecraftpe"

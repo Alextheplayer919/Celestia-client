@@ -32,6 +32,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
+import com.proxy.mcbedrock.hud.HudOverlayService
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.LanDiscovery
 import com.proxy.mcbedrock.net.ServerTarget
@@ -75,6 +76,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var emptyHint: TextView
     private lateinit var summaryLine: TextView
     private lateinit var statsText: TextView
+    private lateinit var hudSwitch: MaterialSwitch
+    private lateinit var hudStatus: TextView
 
     private val ui = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val handler = Handler(Looper.getMainLooper())
@@ -82,6 +85,13 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             render(StatsRegistry.latest)
             handler.postDelayed(this, REFRESH_MS)
+        }
+    }
+
+    private val overlayPermission = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        updateHudStatus()
+        if (HudOverlayService.canDrawOverlays(this) && hudSwitch.isChecked) {
+            HudOverlayService.start(this)
         }
     }
 
@@ -103,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         handler.post(tick)
+        updateHudStatus()
     }
 
     override fun onPause() {
@@ -137,6 +148,8 @@ class MainActivity : AppCompatActivity() {
         emptyHint = findViewById(R.id.emptyHint)
         summaryLine = findViewById(R.id.summaryLine)
         statsText = findViewById(R.id.statsText)
+        hudSwitch = findViewById(R.id.hudSwitch)
+        hudStatus = findViewById(R.id.hudStatus)
     }
 
     private fun wireActions() {
@@ -173,6 +186,31 @@ class MainActivity : AppCompatActivity() {
             updateServerStatus()
         }
 
+        hudSwitch.setOnCheckedChangeListener { _, checked ->
+            if (checked && !HudOverlayService.canDrawOverlays(this)) {
+                // The switch only reflects a running HUD, so bounce it back and send
+                // the user to the system page that grants the permission.
+                hudSwitch.isChecked = false
+                requestOverlayPermission()
+            } else if (checked) {
+                config.hudEnabled = true
+                HudOverlayService.start(this)
+            } else {
+                config.hudEnabled = false
+                HudOverlayService.stop(this)
+            }
+            updateHudStatus()
+        }
+
+        hudPanelButton.setOnClickListener {
+            if (!HudOverlayService.canDrawOverlays(this)) {
+                requestOverlayPermission()
+            } else {
+                if (!hudSwitch.isChecked) hudSwitch.isChecked = true
+                HudOverlayService.toggleMenu(this)
+            }
+        }
+
         hostInput.doAfterTextChanged { updateServerStatus() }
         portInput.doAfterTextChanged { updateServerStatus() }
     }
@@ -181,6 +219,7 @@ class MainActivity : AppCompatActivity() {
         if (hostInput.text.isNullOrBlank()) hostInput.setText(config.host)
         if (portInput.text.isNullOrBlank()) portInput.setText(config.port.toString())
         scopeSwitch.isChecked = config.scopeToServer
+        hudSwitch.isChecked = HudOverlayService.canDrawOverlays(this) && config.hudEnabled
         refreshAppRow()
         renderRecents()
         updateServerStatus()
@@ -364,6 +403,29 @@ class MainActivity : AppCompatActivity() {
             return
         }
         ContextCompat.startForegroundService(this, Intent(this, MinecraftVpnService::class.java))
+    }
+
+    /**
+     * Sends the user to the system "display over other apps" page. There is no
+     * runtime permission dialog for overlays; the page is the only way in, and the
+     * result comes back through [overlayPermission].
+     */
+    private fun requestOverlayPermission() {
+        val intent = Intent(
+            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            android.net.Uri.parse("package:$packageName")
+        )
+        overlayPermission.launch(intent)
+    }
+
+    private fun updateHudStatus() {
+        val allowed = HudOverlayService.canDrawOverlays(this)
+        hudStatus.text = when {
+            !allowed -> getString(R.string.hud_permission_needed)
+            hudSwitch.isChecked -> getString(R.string.hud_running)
+            else -> getString(R.string.hud_stopped)
+        }
+        hudStatus.setTextColor(color(if (allowed) R.color.text_dim else R.color.warn))
     }
 
     private fun requestNotificationsIfNeeded() {
