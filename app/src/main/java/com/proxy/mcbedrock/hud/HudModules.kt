@@ -82,6 +82,12 @@ enum class HudModule(
         description = "How the session is encrypted, and where inspection stops.",
         defaultEnabled = false
     ),
+    MUSIC(
+        id = "music",
+        label = "Music",
+        description = "Now playing, with previous/play/next for whatever player is running in the background.",
+        defaultEnabled = false
+    ),
     OVERHEAD(
         id = "overhead",
         label = "Relay delay",

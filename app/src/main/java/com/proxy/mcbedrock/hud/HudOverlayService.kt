@@ -28,6 +28,9 @@ import androidx.core.app.NotificationCompat
 import com.proxy.mcbedrock.MainActivity
 import com.proxy.mcbedrock.R
 import com.proxy.mcbedrock.StatsRegistry
+import com.proxy.mcbedrock.music.NowPlaying
+import com.proxy.mcbedrock.music.NowPlayingBridge
+import com.proxy.mcbedrock.music.NowPlayingText
 import com.proxy.mcbedrock.net.ConnectionPhase
 import kotlin.math.abs
 
@@ -57,6 +60,13 @@ class HudOverlayService : Service() {
     private var hudLines: LinearLayout? = null
     private var hudTitle: TextView? = null
     private var hudGraph: SparklineView? = null
+    private var musicBlock: View? = null
+    private var musicButtons: View? = null
+    private var musicArt: android.widget.ImageView? = null
+    private var musicTitle: TextView? = null
+    private var musicSubtitle: TextView? = null
+    private var musicProgress: android.widget.ProgressBar? = null
+    private var musicTime: TextView? = null
     private var fabView: View? = null
     private var menuView: View? = null
 
@@ -96,6 +106,10 @@ class HudOverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        if (NowPlayingBridge.hasAccess(this)) {
+            NowPlayingBridge.attachContext(this)
+            NowPlayingBridge.start(this)
+        }
         syncWindows()
 
         handler.removeCallbacks(tick)
@@ -105,6 +119,7 @@ class HudOverlayService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(tick)
+        NowPlayingBridge.stop(this)
         removeView(menuView)
         removeView(hudView)
         removeView(fabView)
@@ -140,6 +155,16 @@ class HudOverlayService : Service() {
         hudLines = view.findViewById(R.id.hudLines)
         hudTitle = view.findViewById(R.id.hudTitle)
         hudGraph = view.findViewById(R.id.hudGraph)
+        musicBlock = view.findViewById(R.id.hudMusic)
+        musicButtons = view.findViewById(R.id.hudMusicButtons)
+        musicArt = view.findViewById(R.id.musicArt)
+        musicTitle = view.findViewById(R.id.musicTitle)
+        musicSubtitle = view.findViewById(R.id.musicSubtitle)
+        musicProgress = view.findViewById(R.id.musicProgress)
+        musicTime = view.findViewById(R.id.musicTime)
+        view.findViewById<View>(R.id.musicPrev).setOnClickListener { NowPlayingBridge.previous() }
+        view.findViewById<View>(R.id.musicPlayPause).setOnClickListener { NowPlayingBridge.playPause() }
+        view.findViewById<View>(R.id.musicNext).setOnClickListener { NowPlayingBridge.next() }
         val params = baseParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -395,6 +420,24 @@ class HudOverlayService : Service() {
         val overlaySwitch = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.clickGuiOverlaySwitch)
         val fabSwitch = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.clickGuiFabSwitch)
         val snapSwitch = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.clickGuiSnapSwitch)
+        val musicNote = view.findViewById<TextView>(R.id.clickGuiMusicNote)
+        val musicGrant = view.findViewById<com.google.android.material.button.MaterialButton>(R.id.clickGuiMusicGrant)
+        fun updateMusicAccess() {
+            val granted = NowPlayingBridge.hasAccess(this)
+            musicNote.visibility = if (granted) View.GONE else View.VISIBLE
+            musicGrant.visibility = if (granted) View.GONE else View.VISIBLE
+            if (!granted) {
+                musicGrant.setOnClickListener {
+                    // Straight to the system page: the wording there is Android's,
+                    // which is why the note above it explains what we actually read.
+                    val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { startActivity(intent) }
+                }
+            }
+        }
+        updateMusicAccess()
+
         overlaySwitch.isChecked = settings.statsPanelVisible
         fabSwitch.isChecked = settings.showFab
         snapSwitch.isChecked = settings.snapToCorner
@@ -473,6 +516,9 @@ class HudOverlayService : Service() {
             append('|').append(flow?.encryptionDescription)
             append('|').append(flow?.relayOverheadAvgMs).append('/').append(flow?.relayOverheadP95Ms)
             append('|').append(flow?.serverRttLastMs).append('/').append(flow?.serverRttMinMs)
+            append('|').append(NowPlayingBridge.current.title).append('/')
+                .append(NowPlayingBridge.current.isPlaying).append('/')
+                .append(NowPlayingBridge.current.positionMs / 1000)
         }
         // Rebuilding the line views only when something changed keeps this off the
         // game's critical path: idle ticks cost one string comparison.
@@ -482,6 +528,7 @@ class HudOverlayService : Service() {
         renderTitle(stats, flow, phases)
         renderLines(lines, stats, flow)
         renderGraph(enabled.any { it == HudModule.HISTORY })
+        renderMusic(enabled.any { it == HudModule.MUSIC })
         repositionHudIfSizeChanged()
     }
 
@@ -533,7 +580,46 @@ class HudOverlayService : Service() {
         HudModule.SERVER_RTT -> flow?.let {
             HudText.serverRtt(it.serverRttLastMs, it.serverRttMinMs, it.serverRttMaxMs)
         } ?: "·"
+        HudModule.MUSIC -> null // drawn as the widget, not as a line
         HudModule.HISTORY -> null // drawn as the graph, not as a line
+    }
+
+    /**
+     * The music widget. Redrawn only when the track, position or play state actually
+     * changed, and the artwork is fetched through the bridge's per-track cache, so a
+     * 2.5 Hz refresh never decodes a bitmap.
+     */
+    private fun renderMusic(enabled: Boolean) {
+        val block = musicBlock ?: return
+        val buttons = musicButtons ?: return
+        val state = NowPlayingBridge.current
+        val show = enabled && state.hasAnything
+        block.visibility = if (show) View.VISIBLE else View.GONE
+        buttons.visibility = if (show) View.VISIBLE else View.GONE
+        if (!show) return
+
+        musicTitle?.text = NowPlayingText.fit(state.title)
+        musicSubtitle?.text = NowPlayingText.fit(NowPlayingText.subtitle(state), 40)
+        musicTime?.text = NowPlayingText.progress(state)
+        musicProgress?.progress = ((state.progress ?: 0f) * 1000).toInt()
+
+        musicButtons?.findViewById<android.widget.ImageButton>(R.id.musicPlayPause)?.setImageResource(
+            if (state.isPlaying) R.drawable.ic_music_pause else R.drawable.ic_music_play
+        )
+        musicButtons?.findViewById<android.widget.ImageButton>(R.id.musicPrev)?.alpha =
+            if (state.canSkipPrevious) 1f else 0.3f
+        musicButtons?.findViewById<android.widget.ImageButton>(R.id.musicNext)?.alpha =
+            if (state.canSkipNext) 1f else 0.3f
+        musicButtons?.findViewById<android.widget.ImageButton>(R.id.musicPlayPause)?.alpha =
+            if (state.canPlayPause) 1f else 0.3f
+
+        val art = musicArt ?: return
+        val bitmap = NowPlayingBridge.artwork(dp(34) * 2)
+        if (bitmap != null) {
+            art.setImageBitmap(bitmap)
+        } else {
+            art.setImageResource(R.drawable.ic_music_play)
+        }
     }
 
     private fun renderGraph(enabled: Boolean) {
@@ -602,6 +688,7 @@ class HudOverlayService : Service() {
                 else -> warning
             }
             HudModule.HANDSHAKE -> if (target.encryptionStarted) warning else dim
+            HudModule.MUSIC -> neutral
             // Above ~1 ms per packet the relay is doing measurable damage; above
             // ~3 ms it is worth investigating before blaming the server.
             HudModule.OVERHEAD -> when {
