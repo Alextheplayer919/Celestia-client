@@ -77,6 +77,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var summaryLine: TextView
     private lateinit var statsText: TextView
     private lateinit var hudSwitch: MaterialSwitch
+    private lateinit var hudPanelButton: MaterialButton
     private lateinit var hudStatus: TextView
 
     private val ui = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -149,6 +150,7 @@ class MainActivity : AppCompatActivity() {
         summaryLine = findViewById(R.id.summaryLine)
         statsText = findViewById(R.id.statsText)
         hudSwitch = findViewById(R.id.hudSwitch)
+        hudPanelButton = findViewById(R.id.hudPanelButton)
         hudStatus = findViewById(R.id.hudStatus)
     }
 
