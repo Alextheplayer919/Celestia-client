@@ -62,6 +62,11 @@ they run and are tested on a desktop JVM (see Testing below).
 
 ## Build
 
+CI (`.github/workflows/build.yml`) only runs when something that can affect the
+build changes. Documentation, README edits and repository housekeeping do not
+start a job; source, tests, resources, Gradle files, the wrapper and the workflow
+itself do.
+
 ```bash
 ./gradlew assembleDebug        # APK in app/build/outputs/apk/debug/
 ./gradlew testDebugUnitTest    # the inspection test suite
