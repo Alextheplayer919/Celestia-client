@@ -107,6 +107,20 @@ It can also be run without Android tooling at all: copy
 `app/src/test/java/com/proxy/mcbedrock/InspectionChecks.kt` into a directory with a
 `main` that calls `InspectionChecks.runAll(verbose = true)` and compile with `kotlinc`.
 
+## Servers and the play test
+
+The target card has **Browse servers**, a convenience list of the featured (partner)
+servers and a few well-known community ones, including the address round-trips and
+ports handled properly. Nothing is probed to build it. The dialog also says the thing
+that matters for the terminated-session mode: partner servers tie sign-in to Xbox
+Live, so a relay that logs in as this app may be refused there.
+
+**Share report** / **Copy** produce a session report — text and the same data as JSON —
+with RTT, jitter, server-leg RTT measured at the relay's socket, the relay's own
+per-packet cost (average and p95), loss, volumes and errors. The report says what it
+cannot know rather than guessing, and flags itself when the relay's cost passes 3 ms
+per packet. `docs/play-test.md` describes the two-pass test those numbers are for.
+
 ## In-game HUD
 
 An optional stats HUD drawn over the game (`SYSTEM_ALERT_WINDOW`), plus a click panel to
