@@ -42,6 +42,12 @@ data class FlowView(
     val mtu: Int,
     val raknetProtocol: Int,
     val encryptionStarted: Boolean,
+    /** Client's own login claim, e.g. `Alex · login 1.26.40 (protocol 2168)`. */
+    val loginDescription: String,
+    /** Client vs server protocol comparison, or null when nothing is known yet. */
+    val protocolComparison: String?,
+    /** How the handshake protects the session, and where inspection stops. */
+    val encryptionDescription: String,
     val idleSeconds: Long
 )
 

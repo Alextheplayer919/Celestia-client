@@ -143,6 +143,9 @@ class MainActivity : AppCompatActivity() {
             text.append("  Server     ").append(flow.serverDescription).append('\n')
             text.append("  Phase      ").append(flow.phase)
                 .append(if (flow.encryptionStarted) " (game traffic encrypted)" else " (cleartext)").append('\n')
+            text.append("  Login      ").append(flow.loginDescription).append('\n')
+            flow.protocolComparison?.let { text.append("  Versions   ").append(it).append('\n') }
+            text.append("  Handshake  ").append(flow.encryptionDescription).append('\n')
             text.append("  Ping       ").append(Format.rtt(flow.rttLastMs))
                 .append("  min ").append(Format.rtt(flow.rttMinMs))
                 .append(" / avg ").append(Format.rtt(flow.rttAvgMs))
@@ -163,9 +166,12 @@ class MainActivity : AppCompatActivity() {
             text.append("  Idle       ").append(flow.idleSeconds).append("s\n")
         }
 
-        text.append("\nScope: UDP relay only. Ping/jitter/loss come from RakNet's own\n")
-        text.append("ping and acknowledgement packets. Game packet contents are\n")
-        text.append("encrypted end-to-end by Bedrock and are not visible to a relay.")
+        text.append("\nRead-only by design: this proxy relays Minecraft's UDP traffic\n")
+        text.append("unchanged and only observes it. Ping/jitter/loss come from RakNet's\n")
+        text.append("own ping and acknowledgement packets; version and account details\n")
+        text.append("come from the login exchange, which is cleartext. Game packets are\n")
+        text.append("encrypted end-to-end with a key derived between the client and the\n")
+        text.append("server, so a relay cannot read coordinates, chat or inventory.")
 
         statsView.text = text.toString()
     }

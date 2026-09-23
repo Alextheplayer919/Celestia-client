@@ -210,3 +210,68 @@ Two honest routes:
 
 Nothing in this document changes what the current build does: it relays UDP packets
 unchanged and reports statistics about them.
+
+## 8. Appendix: wire layouts verified against the codec itself (2026-09-23)
+
+The layouts below were not taken from documentation or memory. They were measured by
+encoding packets with the pinned codec (`Bedrock_v2168.CODEC`) in a plain JVM program and
+hexdumping the result, then reading the same bytes back. That is what `net/BedrockFlowInspector.kt`
+now parses, and what `InspectionChecks` builds independently of the parser.
+
+### 8.1 Login (`0x01`, client → server) — measured
+
+```
+offset  bytes                       meaning
+0       int32 big-endian            protocol version (2168 -> 00 00 08 78)
+4       unsigned varint             size of the remainder of the payload
+..      int32 little-endian         length of the client-data JSON
+..      bytes                       client-data JSON:
+                                      {"Token":"","AuthenticationType":0,
+                                       "Certificate":"{\"chain\":[\"<jwt>\", ...]}"}
+..      int32 little-endian         length of the client JWT
+..      bytes                       client JWT (JWS, ES384, header key "x5u")
+```
+
+Measured example (protocol 2168, one chain JWT, 34-byte chain token):
+
+```
+   0  00 00 08 78 b0 01 69 00 00 00 7b 22 54 6f 6b 65   ...x..i...{"Toke
+  16  6e 22 3a 22 22 2c 22 41 75 74 68 65 6e 74 69 63   n":"","Authentic
+  ...
+ 115  3f 00 00 00 65 79 4a 68 49 6a 6f 79 66 51 2e ...  ?...eyJhIjoyfQ...
+```
+
+Notes that matter:
+- the protocol version is **big-endian**, the two length prefixes are **little-endian**
+  (netty `writeInt` vs `writeIntLE`); the varint between them is skipped, its value was
+  observed to equal the number of bytes that follow it;
+- the chain is nested as an **escaped JSON string** inside `Certificate`, so JWTs inside it
+  are not byte-aligned with the outer fields — hence the parser validates lengths and falls
+  back to scanning for base64url runs if they do not add up;
+- `AuthenticationType` distinguishes a real Xbox chain from a self-signed/guest login.
+
+### 8.2 ServerToClientHandshake (`0x03`, server → client) — measured
+
+```
+[unsigned varint length][ JWT ]
+```
+
+Measured: a 61-byte JWT encoded as `3d 65 79 4a ...` (`0x3d` = 61). The JWT is what the
+*server* puts there: header carries `alg` (`ES384`) and `x5u` (the server's public key),
+payload carries `salt`. Reading it tells us the session is switching to
+`AES` + ECDH-derived keys — and that nothing after it is readable by a passive relay
+(§4). It does **not** let us derive the key: that needs one of the two private keys.
+
+### 8.3 Reproducing the codec table (and this appendix)
+
+`javap`/hexdump harnesses used (JVM 11, classpath = the pinned jars from §2 plus their
+transitives):
+
+- `Dump4.java` — walks the codec jar for `vNNN/Bedrock_vNNN.class`, reflects `CODEC`, and
+  prints `protocolVersion -> minecraftVersion`. That output is the table in
+  `net/ProtocolVersions.kt` verbatim (64 rows, 291 → 2193).
+- `Dump5..Dump8.java` — encode a synthetic `LoginPacket` / `ServerToClientHandshakePacket`
+  and hexdump the body; `Dump8` is the byte-preserving dump that produced the table above.
+
+Rounding: the round-trip check in §3 still holds — `tryEncode` writes packet **bodies only**
+and `tryDecode` requires the packet id to be passed explicitly.
