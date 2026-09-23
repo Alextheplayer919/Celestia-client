@@ -56,6 +56,17 @@ class MinecraftVpnService : VpnService() {
     private var vpnInterface: ParcelFileDescriptor? = null
     private val serviceJob = SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+
+    /**
+     * Held while relaying. On Android 10+ this is the low-latency Wi-Fi lock, which
+     * makes the framework disable Wi-Fi power save (source.android.com/docs/core/
+     * connect/wifi-low-latency) — power save is what turns a steady connection into
+     * 100-300 ms bursts, and it is the biggest thing this app can do for how the
+     * game feels. It costs battery, so it is a user-visible switch and it is released
+     * the moment the relay stops.
+     */
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var lockAcquired = false
     private val tunWriteLock = Mutex()
 
     /** Keyed by "clientPort:remoteAddress:remotePort" — one socket per flow. */
@@ -169,6 +180,7 @@ class MinecraftVpnService : VpnService() {
 
         vpnInterface = iface
         vpnEstablished = true
+        acquireWakeLocks()
         Log.i(TAG, "VPN established, relaying ${relayedPackage} UDP traffic")
 
         serviceScope.launch { relayLoop(iface) }
@@ -240,11 +252,13 @@ class MinecraftVpnService : VpnService() {
                     continue
                 }
 
-                // Read-only inspection of the upstream bytes, before they are sent on.
-                session.inspector.onUpstream(udp.payload, udp.payloadOffset, udp.payloadLength)
+                // (read-only inspection happens after the send, below)
 
                 // Straight passthrough — no delay, no rewrite.
                 session.sendUpstream(udp.payload, udp.payloadOffset, udp.payloadLength)
+                // Read-only inspection of the upstream bytes, after they went out: the
+                // client's own bytes never wait on our reading of them.
+                session.inspector.onUpstream(udp.payload, udp.payloadOffset, udp.payloadLength)
             }
         } catch (e: IOException) {
             Log.w(TAG, "Relay loop ended: ${e.message}")
@@ -370,7 +384,13 @@ class MinecraftVpnService : VpnService() {
                 loginDescription = view.describeLogin(),
                 protocolComparison = view.describeProtocols(),
                 encryptionDescription = view.describeEncryption(),
-                idleSeconds = (now - session.lastActivityMillis) / 1000
+                idleSeconds = (now - session.lastActivityMillis) / 1000,
+                relayOverheadAvgMs = session.overhead.averageMicros() / 1000.0,
+                relayOverheadP95Ms = session.overhead.p95Micros() / 1000.0,
+                serverRttLastMs = session.pingLedger.lastServerRttMs,
+                serverRttMinMs = session.pingLedger.minServerRttMs,
+                serverRttAvgMs = session.pingLedger.averageServerRttMs(),
+                serverRttMaxMs = session.pingLedger.maxServerRttMs,
             )
         }
 
@@ -498,6 +518,7 @@ class MinecraftVpnService : VpnService() {
     }
 
     override fun onRevoke() {
+        releaseWakeLocks()
         // The user (or another VPN app) disconnected us. Android tears the tunnel
         // down after this callback.
         Log.i(TAG, "VPN revoked by the system")
@@ -506,6 +527,7 @@ class MinecraftVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        releaseWakeLocks()
         sessions.values.forEach { it.close() }
         sessions.clear()
         // Cancel rather than join: a relay coroutine can be parked in a blocking
@@ -555,4 +577,42 @@ class MinecraftVpnService : VpnService() {
         private const val ERROR_VPN_DENIED =
             "VPN permission was not granted, so the proxy cannot capture the game's traffic."
     }
+    /**
+     * Acquires the Wi-Fi lock when relaying. Falls back to the high-performance lock
+     * on older Android and does nothing at all on a device that refuses it: a lock is
+     * an optimisation, never a requirement for the relay to work.
+     */
+    private fun acquireWakeLocks() {
+        if (lockAcquired) return
+        if (!RelayConfigStore(this).lowLatencyWifi) return
+        val wifi = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as? android.net.wifi.WifiManager ?: return
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        val lock = try {
+            wifi.createWifiLock(mode, "celestia:relay")
+        } catch (e: Exception) {
+            null
+        } ?: return
+        lock.setReferenceCounted(false)
+        try {
+            lock.acquire()
+            wifiLock = lock
+            lockAcquired = true
+        } catch (e: Exception) {
+            // Missing WAKE_LOCK on some OEM builds: keep relaying regardless.
+            runCatching { lock.release() }
+        }
+    }
+
+    private fun releaseWakeLocks() {
+        if (!lockAcquired) return
+        lockAcquired = false
+        runCatching { wifiLock?.release() }
+        wifiLock = null
+    }
+
 }

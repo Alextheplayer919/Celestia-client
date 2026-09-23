@@ -75,4 +75,6 @@
     <string name="hud_switch_fab">Floating button</string>
     <string name="hud_switch_snap">Snap to nearest corner</string>
     <string name="hud_modules_label">Lines</string>
+    <string name="action_low_latency_wifi">Keep Wi-Fi out of power save</string>
+    <string name="action_low_latency_wifi_hint">Wi-Fi power save is what turns a steady connection into 100-300 ms bursts. Turning this off saves battery but makes ping spikier.</string>
 </resources>

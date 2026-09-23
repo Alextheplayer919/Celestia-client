@@ -40,6 +40,15 @@ class RelayConfigStore(context: Context) {
         get() = prefs.getBoolean(KEY_SCOPE, true)
         set(value) = prefs.edit().putBoolean(KEY_SCOPE, value).apply()
 
+    /**
+     * Keep Wi-Fi out of power save while relaying. On by default because it is the
+     * difference between a steady connection and one that arrives in 100-300 ms
+     * bursts, but it costs battery, so it stays a choice.
+     */
+    var lowLatencyWifi: Boolean
+        get() = prefs.getBoolean(KEY_LOW_LATENCY_WIFI, true)
+        set(value) = prefs.edit().putBoolean(KEY_LOW_LATENCY_WIFI, value).apply()
+
     /** Whether the in-game HUD was left switched on. */
     var hudEnabled: Boolean
         get() = prefs.getBoolean(KEY_HUD, false)
@@ -102,6 +111,7 @@ class RelayConfigStore(context: Context) {
         private const val KEY_SCOPE = "scope_to_server"
         private const val KEY_RECENTS = "recents"
         private const val KEY_HUD = "hud_enabled"
+        private const val KEY_LOW_LATENCY_WIFI = "low_latency_wifi"
 
         /** The Bedrock package on Android; the beta program replaces this same app. */
         const val DEFAULT_PACKAGE = "com.mojang.minecraftpe"

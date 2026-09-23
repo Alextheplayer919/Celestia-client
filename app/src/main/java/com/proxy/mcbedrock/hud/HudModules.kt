@@ -81,6 +81,18 @@ enum class HudModule(
         label = "Handshake",
         description = "How the session is encrypted, and where inspection stops.",
         defaultEnabled = false
+    ),
+    OVERHEAD(
+        id = "overhead",
+        label = "Relay delay",
+        description = "Work the relay itself adds per packet — the part of your ping this app is responsible for.",
+        defaultEnabled = true
+    ),
+    SERVER_RTT(
+        id = "server_rtt",
+        label = "Server RTT",
+        description = "Round-trip time measured at the relay's own socket, excluding the phone's radio.",
+        defaultEnabled = false
     );
 
     companion object {
@@ -118,6 +130,17 @@ object HudText {
 
     fun throughput(upBytesPerSecond: Long, downBytesPerSecond: Long): String =
         "↑${rate(upBytesPerSecond)} ↓${rate(downBytesPerSecond)}"
+
+    /** `0.4ms avg, 3.1ms p95` — the relay's own cost, so it can be held to account. */
+    fun overhead(avgMs: Double, p95Ms: Double): String =
+        if (avgMs <= 0.0) "·" else "%.1fms avg, %.1fms p95".format(avgMs, p95Ms)
+
+    /** `58ms (min 44, max 92)` — measured at the relay, by the relay. */
+    fun serverRtt(lastMs: Int, minMs: Int, maxMs: Int): String = when {
+        lastMs < 0 -> "·"
+        minMs >= 0 && maxMs >= 0 -> "${lastMs}ms (min $minMs, max $maxMs)"
+        else -> "${lastMs}ms"
+    }
 
     fun phase(phase: String, idleSeconds: Long): String = when {
         phase.isBlank() -> "·"

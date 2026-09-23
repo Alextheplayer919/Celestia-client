@@ -256,6 +256,22 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- Networking -->
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/wifiLatencySwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="@string/action_low_latency_wifi"
+            android:textColor="@color/text_primary" />
+
+        <TextView
+            android:id="@+id/wifiLatencyHint"
+            style="@style/CelestiaCaption"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/action_low_latency_wifi_hint" />
+
         <!-- In-game HUD -->
         <com.google.android.material.card.MaterialCardView
             style="@style/CelestiaCard"

@@ -5,6 +5,8 @@ import com.proxy.mcbedrock.net.BedrockBatchReader
 import com.proxy.mcbedrock.net.BedrockFlowInspector
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.ConnectionStats
+import com.proxy.mcbedrock.net.OverheadTracker
+import com.proxy.mcbedrock.net.PingLedger
 import com.proxy.mcbedrock.hud.HudCorner
 import com.proxy.mcbedrock.hud.HudLayout
 import com.proxy.mcbedrock.hud.HudModule
@@ -75,6 +77,8 @@ object InspectionChecks {
         advertisementChecks()
         lanDiscoveryChecks()
         hudModuleChecks()
+        overheadChecks()
+        pingLedgerChecks()
         hudLayoutChecks()
         hudHistoryChecks()
 
@@ -84,6 +88,110 @@ object InspectionChecks {
         }
         println("InspectionChecks: $passed passed, $failed failed")
         return failed
+    }
+
+    // -------------------------------------- relay cost and server-leg round trips
+
+    private fun overheadChecks() {
+        val tracker = OverheadTracker(sampleLimit = 8)
+        check("no samples means no average", tracker.averageMicros() == 0.0)
+        check("no samples means no p95", tracker.p95Micros() == 0.0)
+        check("describe is a placeholder when empty", tracker.describe() == "·")
+
+        repeat(100) { tracker.record(250_000) } // 250 us each
+        check("count tracks every packet", tracker.count == 100L)
+        check("average is exact", kotlin.math.abs(tracker.averageMicros() - 250.0) < 0.001,
+            "got ${tracker.averageMicros()}")
+        check("max is tracked", kotlin.math.abs(tracker.maxMicros() - 250.0) < 0.001)
+        check("p95 of a flat distribution is the value",
+            kotlin.math.abs(tracker.p95Micros() - 250.0) < 0.001, "got ${tracker.p95Micros()}")
+
+        // A single stall must show up in the tail even when it is rare.
+        val spiky = OverheadTracker(sampleLimit = 100)
+        repeat(99) { spiky.record(100_000) }
+        spiky.record(12_000_000) // 12 ms stall
+        check("p95 ignores a rare stall", spiky.p95Micros() < 1_000, "got ${spiky.p95Micros()}")
+        check("max still catches it", spiky.maxMicros() > 10_000, "got ${spiky.maxMicros()}")
+
+        val noisy = OverheadTracker(sampleLimit = 10)
+        repeat(20) { noisy.record((it + 1) * 1_000L) }
+        check("ring keeps only recent samples", noisy.histogram().sum() == 10, "got ${noisy.histogram().sum()}")
+
+        val ignoring = OverheadTracker()
+        ignoring.record(0)
+        ignoring.record(-5)
+        ignoring.record(1_000_000_000_000L) // absurd, would poison the average
+        check("nonsense samples are ignored", ignoring.count == 0L, "got ${ignoring.count}")
+
+        val buckets = OverheadTracker(sampleLimit = 8)
+        buckets.record(5_000)        // <10 us
+        buckets.record(30_000)       // 10-50
+        buckets.record(80_000)       // 50-100
+        buckets.record(300_000)      // 100-500
+        buckets.record(1_500_000)    // 500-2000
+        buckets.record(5_000_000)    // 2000+
+        val h = buckets.histogram()
+        check("histogram places each bucket", h.contentEquals(intArrayOf(1, 1, 1, 1, 1, 1)), "got ${h.toList()}")
+
+        val described = OverheadTracker()
+        described.record(400_000)
+        check("describe shows milliseconds", described.describe().startsWith("0.4ms"), described.describe())
+
+        described.reset()
+        check("reset clears everything", described.count == 0L && described.averageMicros() == 0.0)
+    }
+
+    private fun pingLedgerChecks() {
+        val ledger = PingLedger()
+        check("no RTT before any pong", ledger.lastServerRttMs == -1 && ledger.averageServerRttMs() == -1)
+
+        ledger.onPingForwarded(echoMillis = 1000, nowNanos = 0)
+        val rtt = ledger.onPongForwarded(echoMillis = 1000, nowNanos = 58_000_000)
+        check("matching pong yields the server-leg RTT", rtt == 58, "got $rtt")
+        check("last RTT is stored", ledger.lastServerRttMs == 58)
+        check("min and max are set", ledger.minServerRttMs == 58 && ledger.maxServerRttMs == 58)
+
+        ledger.onPingForwarded(1200, 100_000_000)
+        check("unmatched pong is ignored", ledger.onPongForwarded(9999, 200_000_000) == null)
+        check("average only counts matches", ledger.averageServerRttMs() == 58)
+
+        ledger.onPingForwarded(1300, 100_000_000)
+        ledger.onPongForwarded(1300, 184_000_000) // 84 ms
+        check("average includes the second sample", ledger.averageServerRttMs() == 71, "got ${ledger.averageServerRttMs()}")
+        check("max follows the slower sample", ledger.maxServerRttMs == 84)
+        check("samples are oldest first", ledger.samples() == listOf(58, 84), "got ${ledger.samples()}")
+
+        // A pong cannot be answered before its ping; a negative delta is dropped.
+        ledger.onPingForwarded(1400, 500_000_000)
+        check("backwards clock is rejected", ledger.onPongForwarded(1400, 400_000_000) == null)
+
+        // The pending map must not grow without bound on a long session.
+        val bounded = PingLedger(capacity = 4)
+        for (i in 1..50) bounded.onPingForwarded(i.toLong(), i.toLong())
+        for (i in 1..50) bounded.onPongForwarded(i.toLong(), i.toLong() + 1_000_000)
+        check("ledger stays useful after many pings", bounded.lastServerRttMs == 1, "got ${bounded.lastServerRttMs}")
+
+        bounded.reset()
+        check("reset clears the ledger", bounded.lastServerRttMs == -1 && bounded.samples().isEmpty())
+
+        // Packet sniffing of the ping/pong shapes the ledger depends on.
+        val ping = ByteArray(33)
+        ping[0] = 0x01
+        for (i in 0 until 8) ping[1 + i] = ((0x0000_0000_0000_04D2L shr ((7 - i) * 8)) and 0xFF).toByte()
+        check("unconnected ping echo is read big-endian", PingLedger.pingEcho(ping, 0, ping.size) == 1234L,
+            "got ${PingLedger.pingEcho(ping, 0, ping.size)}")
+
+        val connectedPing = ByteArray(9).also { it[0] = 0x00; it[8] = 42 }
+        check("connected ping is recognised", PingLedger.pingEcho(connectedPing, 0, connectedPing.size) == 42L)
+
+        val pong = ByteArray(9).also { it[0] = 0x1C; it[8] = 7 }
+        check("unconnected pong is recognised", PingLedger.pongEcho(pong, 0, pong.size) == 7L)
+        val connectedPong = ByteArray(17).also { it[0] = 0x03; it[8] = 9 }
+        check("connected pong is recognised", PingLedger.pongEcho(connectedPong, 0, connectedPong.size) == 9L)
+
+        check("a data packet is not mistaken for a ping", PingLedger.pingEcho(ByteArray(20).also { it[0] = 0x84.toByte() }, 0, 20) == null)
+        check("a pong is not mistaken for a ping", PingLedger.pingEcho(pong, 0, pong.size) == null)
+        check("a truncated packet is rejected", PingLedger.pongEcho(ByteArray(4), 0, 4) == null)
     }
 
     private fun check(name: String, condition: Boolean, extra: String = "") {

@@ -471,6 +471,8 @@ class HudOverlayService : Service() {
             append('|').append(stats.targetLabel).append('|').append(stats.scopeDescription)
             append('|').append(flow?.serverDescription).append('|').append(flow?.loginDescription)
             append('|').append(flow?.encryptionDescription)
+            append('|').append(flow?.relayOverheadAvgMs).append('/').append(flow?.relayOverheadP95Ms)
+            append('|').append(flow?.serverRttLastMs).append('/').append(flow?.serverRttMinMs)
         }
         // Rebuilding the line views only when something changed keeps this off the
         // game's critical path: idle ticks cost one string comparison.
@@ -527,6 +529,10 @@ class HudOverlayService : Service() {
         HudModule.SERVER -> flow?.serverDescription
         HudModule.LOGIN -> flow?.loginDescription
         HudModule.HANDSHAKE -> flow?.encryptionDescription
+        HudModule.OVERHEAD -> flow?.let { HudText.overhead(it.relayOverheadAvgMs, it.relayOverheadP95Ms) } ?: "·"
+        HudModule.SERVER_RTT -> flow?.let {
+            HudText.serverRtt(it.serverRttLastMs, it.serverRttMinMs, it.serverRttMaxMs)
+        } ?: "·"
         HudModule.HISTORY -> null // drawn as the graph, not as a line
     }
 
@@ -596,6 +602,20 @@ class HudOverlayService : Service() {
                 else -> warning
             }
             HudModule.HANDSHAKE -> if (target.encryptionStarted) warning else dim
+            // Above ~1 ms per packet the relay is doing measurable damage; above
+            // ~3 ms it is worth investigating before blaming the server.
+            HudModule.OVERHEAD -> when {
+                target.relayOverheadAvgMs <= 0.0 -> dim
+                target.relayOverheadAvgMs < 1.0 -> healthy
+                target.relayOverheadAvgMs < 3.0 -> warning
+                else -> bad
+            }
+            HudModule.SERVER_RTT -> when {
+                target.serverRttLastMs < 0 -> dim
+                target.serverRttLastMs < 80 -> healthy
+                target.serverRttLastMs < 160 -> warning
+                else -> bad
+            }
             else -> neutral
         }
     }
