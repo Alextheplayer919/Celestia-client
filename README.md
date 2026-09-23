@@ -102,6 +102,24 @@ It can also be run without Android tooling at all: copy
 `app/src/test/java/com/proxy/mcbedrock/InspectionChecks.kt` into a directory with a
 `main` that calls `InspectionChecks.runAll(verbose = true)` and compile with `kotlinc`.
 
+## What the relay can see (and what it cannot)
+
+Cleartext, and therefore reported by the UI:
+
+- the RakNet handshake: MTU, client RakNet protocol, server advertisement (MOTD, version,
+  players), RTT/jitter/loss from ping and acknowledgement traffic;
+- the login exchange: the protocol version the client logged in with (mapped to a
+  Minecraft version), whether the login carried an Xbox chain, the account name the client
+  put in its own token, and what the server's `ServerToClientHandshake` negotiated
+  (`ES384`, server key present, salt size).
+
+Not readable, by construction: everything after that handshake. Bedrock encrypts it with a
+key derived by ECDH between the client and the server; a relay holds neither private key.
+No coordinates, chat, inventory or entity data is decrypted, and nothing is written back —
+the relay copies datagrams and only reads a mirror of them. Details, including the verified
+byte layouts and the MITM alternative, are in `docs/decode-research.md`; what was learned
+from the reference client is in `docs/eclient-notes.md`.
+
 ## Protocol notes
 
 - Minecraft Bedrock **26.40 is protocol 2168** (`26.44` also 2168, `26.45` is 2169).

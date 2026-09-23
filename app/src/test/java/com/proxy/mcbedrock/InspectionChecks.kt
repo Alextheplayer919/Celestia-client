@@ -5,7 +5,9 @@ import com.proxy.mcbedrock.net.BedrockBatchReader
 import com.proxy.mcbedrock.net.BedrockFlowInspector
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.ConnectionStats
+import com.proxy.mcbedrock.net.JwtScan
 import com.proxy.mcbedrock.net.Nack
+import com.proxy.mcbedrock.net.ProtocolVersions
 import com.proxy.mcbedrock.net.OpenConnectionReply1
 import com.proxy.mcbedrock.net.OpenConnectionRequest1
 import com.proxy.mcbedrock.net.RakNet
@@ -56,6 +58,9 @@ object InspectionChecks {
         bedrockBatchChecks()
         connectionStatsChecks()
         flowPhaseChecks()
+        protocolTableChecks()
+        jwtChecks()
+        loginInspectionChecks()
 
         lastPassed = passed
         if (verbose || failed > 0) {
@@ -487,6 +492,135 @@ object InspectionChecks {
         check("junk payload leaves stats sane", inspector.stats.snapshot().upstreamPackets > 0)
     }
 
+    // ------------------------------------------- protocol table + JWT reading
+
+    private fun protocolTableChecks() {
+        check("target protocol labelled", ProtocolVersions.label(2168) == "1.26.40", "got ${ProtocolVersions.label(2168)}")
+        check("describe names both", ProtocolVersions.describe(2168) == "1.26.40 (protocol 2168)")
+        check("unknown protocol still described", ProtocolVersions.describe(9999).contains("9999"))
+        check("unknown protocol marked unnamed", ProtocolVersions.describe(9999).contains("unnamed"))
+        check("negative protocol described", ProtocolVersions.describe(-1) == "unknown")
+        check("newest known protocol", ProtocolVersions.newestKnown == 2193, "got ${ProtocolVersions.newestKnown}")
+        check("oldest known protocol", ProtocolVersions.oldestKnown == 291, "got ${ProtocolVersions.oldestKnown}")
+        check("comparison of equal versions", ProtocolVersions.compare(2168, 2168)?.startsWith("both") == true)
+        check("comparison flags a mismatch", ProtocolVersions.compare(2168, 2169)?.contains("differ") == true)
+        check("comparison with silent server", ProtocolVersions.compare(2168, -1)?.contains("not advertised") == true)
+        check("comparison with nothing known", ProtocolVersions.compare(-1, -1) == null)
+    }
+
+    private fun jwtChecks() {
+        val token = JwtScan.split(
+            jwt(
+                header = """{"alg":"ES384","x5u":"MFkwEwYH"}""",
+                payload = """{"extraData":{"DisplayName":"Alex\"The\"Player","XUID":"25354"}}"""
+            )
+        )
+        check("jwt header decoded", token != null && token.headerJson.contains("ES384"))
+        check("jwt payload decoded", token?.payloadJson?.contains("XUID") == true)
+        check("jwt signature flagged", token?.hasSignature == true)
+        check("nested display name read", JwtScan.deepStringField(token?.payloadJson, "DisplayName") == "Alex\"The\"Player")
+        check(
+            "casing-tolerant lookup",
+            JwtScan.firstStringField(token?.payloadJson, "displayName", "DisplayName") == "Alex\"The\"Player"
+        )
+        check("object member detected", JwtScan.hasKey(token?.payloadJson, "extraData"))
+        check("absent key not detected", !JwtScan.hasKey(token?.payloadJson, "salt"))
+        check("non-string value refused", JwtScan.stringField(token?.payloadJson, "extraData") == null)
+
+        // The double-encoded shape some client versions use for extraData.
+        val nested = JwtScan.split(jwt("""{"alg":"ES384"}""", """{"extraData":"{\"DisplayName\":\"Nested\"}"}"""))
+        check("double-encoded display name read", JwtScan.deepStringField(nested?.payloadJson, "DisplayName") == "Nested")
+
+        check("malformed token rejected", JwtScan.split("not-a-jwt") == null)
+        check("two-part token rejected", JwtScan.split("a.b") == null)
+        check("blank token rejected", JwtScan.split(null) == null)
+        check("invalid base64 rejected", JwtScan.split("!!!.???.***") == null)
+        check("escaped newline decoded", JwtScan.stringField("""{"a":"x\ny"}""", "a") == "x\ny")
+        check("unicode escape decoded", JwtScan.stringField("""{"a":"\u0041"}""", "a") == "A")
+        check("key as value not matched", JwtScan.stringField("""{"a":"salt","b":"v"}""", "salt") == null)
+        check("real key found beside lookalike", JwtScan.stringField("""{"a":"salt","salt":"QUJD"}""", "salt") == "QUJD")
+        check("missing key returns null", JwtScan.stringField("""{"a":"b"}""", "c") == null)
+    }
+
+    // ----------------------------- login/handshake facts visible in cleartext
+
+    private fun loginInspectionChecks() {
+        val inspector = BedrockFlowInspector(
+            remoteAddress = InetAddress.getByName("203.0.113.7"),
+            remotePort = 19132,
+            clientPort = 41234
+        )
+
+        val chainJwt = jwt("""{"alg":"ES384"}""", """{"extraData":{"DisplayName":"Alex","XUID":"25354"}}""")
+        val clientData = """{"Token":"","AuthenticationType":0,"Certificate":"{\"chain\":[\"$chainJwt\"]}"}"""
+        val clientJwt = jwt("""{"alg":"ES384","x5u":"MFkwEwYH"}""", """{"extraData":{"DisplayName":"Alex","XUID":"25354"}}""")
+
+        val loginBody = loginPacketBody(2168, clientData, clientJwt)
+        val loginDatagram = rakNetDatagram(
+            1,
+            listOf(frameOf(bedrockBatch(listOf(RakNet.BEDROCK_PKT_LOGIN to loginBody)), reliability = 3))
+        )
+        inspector.onUpstream(loginDatagram, 0, loginDatagram.size)
+
+        check("client protocol read from login", inspector.clientLoginProtocol == 2168, "got ${inspector.clientLoginProtocol}")
+        check("login chain detected", inspector.loginHasChain)
+        check("display name read from login", inspector.loginDisplayName == "Alex", "got ${inspector.loginDisplayName}")
+        check("login description carries version", inspector.describeLogin().contains("1.26.40"))
+        check("login keeps phase at GAME_LOGIN", inspector.phase == ConnectionPhase.GAME_LOGIN)
+
+        // Server handshake, exactly the byte shape the codec emits.
+        val serverJwt = jwt("""{"alg":"ES384","x5u":"MFkwEwYH"}""", """{"salt":"AAAAAAAAAAAAAAAAAAAAAA"}""")
+        val jwtBytes = serverJwt.toByteArray(Charsets.UTF_8)
+        val handshakeBody = varUInt(jwtBytes.size) + jwtBytes
+        val handshakeDatagram = rakNetDatagram(
+            2,
+            listOf(
+                frameOf(
+                    bedrockBatch(listOf(RakNet.BEDROCK_PKT_SERVER_TO_CLIENT_HANDSHAKE to handshakeBody)),
+                    reliability = 3
+                )
+            )
+        )
+        inspector.onDownstream(handshakeDatagram, 0, handshakeDatagram.size)
+
+        check("handshake algorithm read", inspector.handshakeAlgorithm == "ES384", "got ${inspector.handshakeAlgorithm}")
+        check("handshake server key detected", inspector.handshakeServerKeyPresent)
+        check("handshake salt size read", inspector.handshakeSaltBytes == 16, "got ${inspector.handshakeSaltBytes}")
+        check("encryption description names the algorithm", inspector.describeEncryption().contains("ES384"))
+        check("phase becomes ENCRYPTED", inspector.phase == ConnectionPhase.ENCRYPTED)
+        check("protocol comparison available", inspector.describeProtocols()?.contains("client") == true)
+
+        // A body that does not match the layout must not invent values or throw.
+        val tolerant = BedrockFlowInspector(
+            remoteAddress = InetAddress.getByName("203.0.113.8"),
+            remotePort = 19132,
+            clientPort = 41235
+        )
+        val truncated = rakNetDatagram(
+            1,
+            listOf(frameOf(bedrockBatch(listOf(RakNet.BEDROCK_PKT_LOGIN to byte(9, 9, 9))), reliability = 3))
+        )
+        tolerant.onUpstream(truncated, 0, truncated.size)
+        check("truncated login tolerated", tolerant.clientLoginProtocol == -1)
+        check("truncated login leaves no name", tolerant.loginDisplayName == null)
+
+        // A login whose stated lengths run past the payload must be rejected too.
+        val lying = loginPacketBody(2168, """{"chain":[]}""", clientJwt).copyOf()
+        lying[8] = 0x7F // claim a far larger client-data JSON than is present
+        val lyingInspector = BedrockFlowInspector(
+            remoteAddress = InetAddress.getByName("203.0.113.9"),
+            remotePort = 19132,
+            clientPort = 41236
+        )
+        val lyingDatagram = rakNetDatagram(
+            1,
+            listOf(frameOf(bedrockBatch(listOf(RakNet.BEDROCK_PKT_LOGIN to lying)), reliability = 3))
+        )
+        lyingInspector.onUpstream(lyingDatagram, 0, lyingDatagram.size)
+        check("overlong client-data length rejected", lyingInspector.loginDisplayName == null)
+        check("protocol still read when lengths lie", lyingInspector.clientLoginProtocol == 2168)
+    }
+
     // ------------------------------------------------- synthetic packet builders
     // Deliberately hand-rolled from the documented layouts, independent of the
     // production parser, so these checks are not self-fulfilling.
@@ -577,6 +711,31 @@ object InspectionChecks {
         }
         return byte(0xFE) + varUInt(body.size) + body
     }
+
+    /**
+     * Login packet body in the layout the reference codec writes (verified with a
+     * hexdump of its own encoder, see docs/decode-research.md):
+     * int32 BE protocol version, varint size of the rest, int32 LE client-data
+     * JSON length, JSON, int32 LE client JWT length, JWT.
+     */
+    private fun loginPacketBody(protocolVersion: Int, clientDataJson: String, clientJwt: String): ByteArray {
+        val json = clientDataJson.toByteArray(Charsets.UTF_8)
+        val jwtBytes = clientJwt.toByteArray(Charsets.UTF_8)
+        val rest = u32le(json.size) + json + u32le(jwtBytes.size) + jwtBytes
+        return u32be(protocolVersion.toLong()) + varUInt(rest.size) + rest
+    }
+
+    private fun u32le(value: Int) = byte(
+        value and 0xFF, (value shr 8) and 0xFF, (value shr 16) and 0xFF, (value shr 24) and 0xFF
+    )
+
+    private fun base64Url(bytes: ByteArray): String =
+        java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+
+    private fun jwt(header: String, payload: String): String =
+        base64Url(header.toByteArray(Charsets.UTF_8)) + "." +
+            base64Url(payload.toByteArray(Charsets.UTF_8)) + "." +
+            base64Url(byte(1, 2, 3, 4))
 
     private fun varUInt(value: Int): ByteArray {
         var v = value
