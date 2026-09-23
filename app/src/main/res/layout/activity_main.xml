@@ -12,7 +12,7 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <!-- Header ------------------------------------------------------------------ -->
+        <!-- Header  -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -64,7 +64,7 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Target server ---------------------------------------------------------- -->
+        <!-- Target server  -->
         <com.google.android.material.card.MaterialCardView
             style="@style/CelestiaCard"
             android:layout_width="match_parent"
@@ -183,7 +183,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- App to relay ----------------------------------------------------------- -->
+        <!-- App to relay  -->
         <com.google.android.material.card.MaterialCardView
             style="@style/CelestiaCard"
             android:layout_width="match_parent"
@@ -256,7 +256,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Controls --------------------------------------------------------------- -->
+        <!-- Controls  -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -282,7 +282,7 @@
                 app:cornerRadius="14dp" />
         </LinearLayout>
 
-        <!-- Session ---------------------------------------------------------------- -->
+        <!-- Session  -->
         <com.google.android.material.card.MaterialCardView
             style="@style/CelestiaCard"
             android:layout_width="match_parent"
