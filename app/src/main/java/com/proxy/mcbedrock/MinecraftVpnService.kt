@@ -1,46 +1,64 @@
 package com.proxy.mcbedrock
 
+import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.proxy.mcbedrock.net.UdpNatSession
+import com.proxy.mcbedrock.net.parseIpv4Udp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Establishes an Android VPN interface so this process can see the device's
- * outbound UDP traffic — including Minecraft Bedrock's RakNet packets on
- * port 19132 — before it leaves the device, and relay it (unmodified or
- * lightly buffered) to the real destination.
+ * Establishes an Android VPN interface scoped to just the Minecraft Bedrock
+ * app, and relays its UDP (RakNet) traffic to the real destination via a
+ * per-flow NAT session table — a straight passthrough proxy, with a hook
+ * point for read-only packet inspection as features get layered on.
  *
  * IMPORTANT — scope boundary for this project:
- * This service should only ever READ and RELAY packets, optionally with
- * timing/buffering changes on the DOWNSTREAM (server -> client) side for
- * jitter smoothing. It should never rewrite or delay packets on the
- * UPSTREAM (client -> server) side in a way that changes *when* input
- * reaches the server — that's the line between "connection tooling" and
- * a timing-exploit cheat. Keep upstream relay a straight passthrough.
+ * This service should only ever READ and RELAY packets. It should never
+ * rewrite or delay packets on the UPSTREAM (client -> server) side in a way
+ * that changes *when* input reaches the server — that's the line between
+ * "connection tooling" and a timing-exploit cheat. Upstream relay here is a
+ * straight passthrough, on purpose.
  */
 class MinecraftVpnService : VpnService() {
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private val serviceJob = Job()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
+    private val tunWriteLock = Mutex()
+
+    // Keyed by "clientPort:remoteAddr:remotePort" — one real socket per flow.
+    private val sessions = ConcurrentHashMap<String, UdpNatSession>()
 
     companion object {
         private const val TAG = "MCBedrockProxy"
         private const val VPN_ADDRESS = "10.0.0.2"
         private const val VPN_ROUTE = "0.0.0.0"
-        private const val MINECRAFT_BEDROCK_PORT = 19132
+
+        // Standard Bedrock package name on the Play Store build. If you're
+        // running a different build (Preview, Windows Store sideload, etc.)
+        // update this — addAllowedApplication throws NameNotFoundException
+        // for a package that isn't installed, which we handle below.
+        private const val MINECRAFT_PACKAGE = "com.mojang.minecraftpe"
+
+        // A session with no activity for this long is considered dead and
+        // gets torn down, so we're not leaking sockets over a long play
+        // session with lots of short-lived flows (server pings, etc.).
+        private const val SESSION_IDLE_TIMEOUT_MS = 2 * 60 * 1000L
     }
 
     override fun onCreate() {
         super.onCreate()
         startVpn()
+        startSessionReaper()
     }
 
     private fun startVpn() {
@@ -49,9 +67,14 @@ class MinecraftVpnService : VpnService() {
             .addAddress(VPN_ADDRESS, 32)
             .addRoute(VPN_ROUTE, 0)
             .setMtu(1500)
-            // TODO: once you're only intercepting Minecraft, scope this down
-            // with addAllowedApplication(packageNameOfMinecraft) so the rest
-            // of the device's traffic doesn't route through here at all.
+
+        try {
+            builder.addAllowedApplication(MINECRAFT_PACKAGE)
+        } catch (e: PackageManager.NameNotFoundException) {
+            Log.e(TAG, "$MINECRAFT_PACKAGE not installed — update MINECRAFT_PACKAGE " +
+                "to match your actual Minecraft build, or the VPN will capture " +
+                "every app's traffic instead of just Minecraft's.")
+        }
 
         vpnInterface = builder.establish()
 
@@ -66,47 +89,62 @@ class MinecraftVpnService : VpnService() {
     }
 
     /**
-     * Core relay loop. This skeleton just logs that packets arrived — the
-     * real implementation needs to:
-     *
-     *  1. Parse the raw bytes read from the TUN interface as IP packets,
-     *     pull out the UDP payload (this is IP-layer, not yet Bedrock-aware).
-     *  2. Identify flows destined for MINECRAFT_BEDROCK_PORT (or wherever the
-     *     user's server actually is — Bedrock can run on other ports).
-     *  3. Open a real UDP socket (via `protect()`, required so the relayed
-     *     socket doesn't loop back into the VPN interface) to the true
-     *     destination and forward the payload.
-     *  4. For downstream packets: optionally buffer briefly to smooth jitter
-     *     before writing back into the TUN interface for Minecraft to read.
-     *  5. Hand a copy of decoded packets to a stats/overlay collector —
-     *     this is where CloudburstMC/Protocol's RakNet + game packet codecs
-     *     plug in, once that dependency is wired up in build.gradle.kts.
+     * Reads packets from the TUN interface (device -> "internet", from the
+     * app's point of view) and relays each to its real destination.
      */
     private suspend fun relayLoop(iface: ParcelFileDescriptor) {
         val input = FileInputStream(iface.fileDescriptor)
         val output = FileOutputStream(iface.fileDescriptor)
-        val buffer = ByteBuffer.allocate(32767)
+        val buffer = ByteArray(32767)
 
         while (true) {
-            buffer.clear()
-            val length = input.read(buffer.array())
+            val length = input.read(buffer)
             if (length <= 0) continue
 
-            // TODO: replace this stub with real IP/UDP parsing + relay.
-            // Left as a placeholder so the service compiles and the VPN
-            // interface comes up — nothing is actually relayed yet, so
-            // Minecraft traffic through this interface will currently
-            // just stall. Don't ship until the relay is implemented.
-            Log.d(TAG, "Captured $length bytes from TUN interface (unhandled)")
+            val udp = parseIpv4Udp(buffer, length) ?: continue // not IPv4/UDP — drop
 
-            // Suppress unused warning on `output` until relay writes to it.
-            output.let { }
+            val sessionKey = "${udp.sourcePort}:${udp.destAddress.hostAddress}:${udp.destPort}"
+            val session = sessions.getOrPut(sessionKey) {
+                UdpNatSession(
+                    vpnService = this,
+                    scope = serviceScope,
+                    tunOutput = output,
+                    tunWriteLock = tunWriteLock,
+                    clientPort = udp.sourcePort,
+                    remoteAddress = udp.destAddress,
+                    remotePort = udp.destPort
+                ).also { it.start() }
+            }
+
+            // TODO: read-only decode hook for upstream (device -> server)
+            // packets goes here too, if a feature needs to see both
+            // directions — e.g. matching request/response for a stats
+            // overlay. Never mutate udp.payload before sendUpstream below.
+
+            session.sendUpstream(udp.payload, udp.payloadOffset, udp.payloadLength)
+        }
+    }
+
+    /** Periodically closes NAT sessions that have gone idle. */
+    private fun startSessionReaper() {
+        serviceScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(30_000)
+                val now = System.currentTimeMillis()
+                val stale = sessions.filterValues { now - it.lastActivityMillis > SESSION_IDLE_TIMEOUT_MS }
+                stale.forEach { (key, session) ->
+                    session.close()
+                    sessions.remove(key)
+                }
+            }
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         serviceJob.cancel()
+        sessions.values.forEach { it.close() }
+        sessions.clear()
         vpnInterface?.close()
         vpnInterface = null
     }
