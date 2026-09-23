@@ -71,4 +71,8 @@
     <string name="hud_readonly_note">Nothing here reads or changes game data: coordinates, inventory and chat are encrypted between the client and the server and never reach this app.</string>
     <string name="hud_open_panel">Open HUD panel</string>
     <string name="hud_fab_glyph">HUD</string>
+    <string name="hud_switch_overlay">Stats overlay</string>
+    <string name="hud_switch_fab">Floating button</string>
+    <string name="hud_switch_snap">Snap to nearest corner</string>
+    <string name="hud_modules_label">Lines</string>
 </resources>
