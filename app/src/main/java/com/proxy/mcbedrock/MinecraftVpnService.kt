@@ -310,6 +310,9 @@ class MinecraftVpnService : VpnService() {
                 mtu = view.negotiatedMtu,
                 raknetProtocol = view.raknetClientProtocol,
                 encryptionStarted = view.encryptionStarted,
+                loginDescription = view.describeLogin(),
+                protocolComparison = view.describeProtocols(),
+                encryptionDescription = view.describeEncryption(),
                 idleSeconds = (now - session.lastActivityMillis) / 1000
             )
         }
