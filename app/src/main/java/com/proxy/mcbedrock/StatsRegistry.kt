@@ -48,7 +48,16 @@ data class FlowView(
     val protocolComparison: String?,
     /** How the handshake protects the session, and where inspection stops. */
     val encryptionDescription: String,
-    val idleSeconds: Long
+    val idleSeconds: Long,
+
+    /** Work the relay itself did per packet: the cost the player pays for the proxy. */
+    val relayOverheadAvgMs: Double = 0.0,
+    val relayOverheadP95Ms: Double = 0.0,
+    /** RTT to the server measured at the relay's own socket, not the client's. */
+    val serverRttLastMs: Int = -1,
+    val serverRttMinMs: Int = -1,
+    val serverRttAvgMs: Int = -1,
+    val serverRttMaxMs: Int = -1,
 )
 
 /** Aggregate state of the proxy for the UI and the notification. */

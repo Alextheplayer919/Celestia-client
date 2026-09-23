@@ -18,6 +18,12 @@
         measures itself and draws nothing that reads or alters game content.
     -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!--
+        Needed for the Wi-Fi lock taken while relaying, which turns off Wi-Fi power
+        save so the connection stops arriving in 100-300 ms bursts. Acquired only for
+        the duration of a relay session, released when it stops.
+    -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!--
         Since Android 11 an app cannot enumerate the installed apps without the

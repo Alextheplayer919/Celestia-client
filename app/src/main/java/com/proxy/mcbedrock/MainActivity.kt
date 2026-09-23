@@ -76,6 +76,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var emptyHint: TextView
     private lateinit var summaryLine: TextView
     private lateinit var statsText: TextView
+    private lateinit var wifiLatencySwitch: MaterialSwitch
     private lateinit var hudSwitch: MaterialSwitch
     private lateinit var hudPanelButton: MaterialButton
     private lateinit var hudStatus: TextView
@@ -149,6 +150,9 @@ class MainActivity : AppCompatActivity() {
         emptyHint = findViewById(R.id.emptyHint)
         summaryLine = findViewById(R.id.summaryLine)
         statsText = findViewById(R.id.statsText)
+        wifiLatencySwitch = findViewById(R.id.wifiLatencySwitch)
+        wifiLatencySwitch.isChecked = config.lowLatencyWifi
+        wifiLatencySwitch.setOnCheckedChangeListener { _, checked -> config.lowLatencyWifi = checked }
         hudSwitch = findViewById(R.id.hudSwitch)
         hudPanelButton = findViewById(R.id.hudPanelButton)
         hudStatus = findViewById(R.id.hudStatus)

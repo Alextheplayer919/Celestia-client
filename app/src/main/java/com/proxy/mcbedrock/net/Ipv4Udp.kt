@@ -167,6 +167,51 @@ fun buildIpv4Udp(
 }
 
 /**
+ * Same as [buildIpv4Udp] but writes into [destination] and returns the packet
+ * length instead of allocating.
+ *
+ * The reply path runs for every downstream datagram, and during chunk loading that
+ * is thousands of allocations per second on a device that is also rendering. One
+ * reused buffer per session keeps the relay off the garbage collector.
+ *
+ * Returns 0 when [destination] is too small, so a caller cannot silently send a
+ * truncated packet.
+ */
+fun buildIpv4UdpInto(
+    destination: ByteArray,
+    fromAddress: InetAddress,
+    fromPort: Int,
+    toAddress: InetAddress,
+    toPort: Int,
+    payload: ByteArray,
+    payloadLength: Int
+): Int {
+    val totalLength = IPV4_MIN_HEADER_LEN + UDP_HEADER_LEN + payloadLength
+    if (totalLength > destination.size) return 0
+
+    destination[0] = ((IPV4_VERSION shl 4) or 5).toByte()
+    destination[1] = 0
+    writeUInt16(destination, 2, totalLength)
+    writeUInt16(destination, 4, 0)
+    writeUInt16(destination, 6, 0)
+    destination[8] = 64
+    destination[9] = PROTOCOL_UDP.toByte()
+    writeUInt16(destination, 10, 0)
+    System.arraycopy(fromAddress.address, 0, destination, 12, 4)
+    System.arraycopy(toAddress.address, 0, destination, 16, 4)
+    writeUInt16(destination, 10, computeIpv4Checksum(destination, 0, IPV4_MIN_HEADER_LEN))
+
+    val udpOffset = IPV4_MIN_HEADER_LEN
+    writeUInt16(destination, udpOffset, fromPort)
+    writeUInt16(destination, udpOffset + 2, toPort)
+    writeUInt16(destination, udpOffset + 4, UDP_HEADER_LEN + payloadLength)
+    writeUInt16(destination, udpOffset + 6, 0) // checksum = 0 (unused, valid for IPv4)
+    System.arraycopy(payload, 0, destination, udpOffset + UDP_HEADER_LEN, payloadLength)
+
+    return totalLength
+}
+
+/**
  * Builds an ICMPv4 "destination unreachable" message, quoting the start of the
  * packet that could not be delivered (RFC 792).
  *
