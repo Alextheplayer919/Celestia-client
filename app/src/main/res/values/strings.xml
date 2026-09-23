@@ -48,4 +48,27 @@
     <string name="notification_starting">Starting…</string>
     <string name="notification_idle">Waiting for game traffic</string>
     <string name="notification_action_stop">Stop</string>
+
+    <string name="section_hud">In-game HUD</string>
+    <string name="section_hud_hint">A small read-only panel drawn over the game: ping, jitter, loss, session state. Drag it anywhere; tap the round button to open the panel and choose which lines show.</string>
+    <string name="action_show_hud">Show it over the game</string>
+    <string name="action_open_panel">Open panel</string>
+    <string name="hud_permission_needed">Android needs "display over other apps" permission for the HUD.</string>
+    <string name="hud_permission_granted">HUD permission granted.</string>
+    <string name="hud_permission_missing">Overlay permission is missing, so the HUD cannot be drawn.</string>
+    <string name="hud_running">HUD is on</string>
+    <string name="hud_stopped">HUD is off</string>
+    <string name="hud_default_title">Celestia</string>
+    <string name="hud_channel_name">Stats HUD</string>
+    <string name="hud_channel_description">Keeps the on-screen stats HUD alive while you play.</string>
+    <string name="hud_notification_title">Celestia HUD</string>
+    <string name="hud_notification_text">Showing connection stats over the game.</string>
+    <string name="hud_panel_title">HUD modules</string>
+    <string name="hud_panel_subtitle">Read-only measurements from the relay. Drag this panel to move it.</string>
+    <string name="hud_corner_label">Snap position</string>
+    <string name="hud_reset">Reset</string>
+    <string name="hud_close">Close</string>
+    <string name="hud_readonly_note">Nothing here reads or changes game data: coordinates, inventory and chat are encrypted between the client and the server and never reach this app.</string>
+    <string name="hud_open_panel">Open HUD panel</string>
+    <string name="hud_fab_glyph">HUD</string>
 </resources>

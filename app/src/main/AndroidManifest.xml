@@ -12,6 +12,12 @@
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!--
+        The stats HUD is drawn by an app-installed overlay window over the game, so
+        it needs the "display over other apps" permission. It shows numbers this app
+        measures itself and draws nothing that reads or alters game content.
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!--
         Since Android 11 an app cannot enumerate the installed apps without the
@@ -46,6 +52,15 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".hud.HudOverlayService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Draws the user's own connection statistics as a small overlay while they play." />
+        </service>
 
         <service
             android:name=".MinecraftVpnService"

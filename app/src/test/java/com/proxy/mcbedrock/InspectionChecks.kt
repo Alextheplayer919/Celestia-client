@@ -5,6 +5,12 @@ import com.proxy.mcbedrock.net.BedrockBatchReader
 import com.proxy.mcbedrock.net.BedrockFlowInspector
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.ConnectionStats
+import com.proxy.mcbedrock.hud.HudCorner
+import com.proxy.mcbedrock.hud.HudLayout
+import com.proxy.mcbedrock.hud.HudModule
+import com.proxy.mcbedrock.hud.HudText
+import com.proxy.mcbedrock.hud.SampleRing
+import com.proxy.mcbedrock.hud.StatsHistory
 import com.proxy.mcbedrock.net.LanDiscovery
 import com.proxy.mcbedrock.net.ServerAdvertisement
 import com.proxy.mcbedrock.net.ServerTarget
@@ -68,6 +74,9 @@ object InspectionChecks {
         targetRulesChecks()
         advertisementChecks()
         lanDiscoveryChecks()
+        hudModuleChecks()
+        hudLayoutChecks()
+        hudHistoryChecks()
 
         lastPassed = passed
         if (verbose || failed > 0) {
@@ -720,6 +729,110 @@ object InspectionChecks {
         check("truncated pong rejected", LanDiscovery.parsePong(pong, 0, 20, 19132, 0L) == null)
         val lyingLength = byte(0x1C) + i64be(1L) + i64be(1L) + magic() + u16be(500) + motdBytes
         check("pong with an overlong motd length rejected", LanDiscovery.parsePong(lyingLength, 0, lyingLength.size, 19132, 0L) == null)
+    }
+
+    // ----------------------------------------------- HUD modules, layout, graph
+
+    private fun hudModuleChecks() {
+        check("module ids are unique", HudModule.ordered.map { it.id }.toSet().size == HudModule.ordered.size)
+        check("module lookup by id", HudModule.byId("ping") == HudModule.PING)
+        check("unknown module id is null", HudModule.byId("nope") == null)
+        check("every module has a description", HudModule.ordered.all { it.description.isNotBlank() })
+        check("defaults are a subset of modules", HudModule.defaultEnabledIds.all { HudModule.byId(it) != null })
+        check("ping is on by default", HudModule.PING.defaultEnabled)
+        check("no cheat-style modules exist", HudModule.ordered.none {
+            val name = it.id.lowercase()
+            name.contains("aura") || name.contains("esp") || name.contains("xray") || name.contains("fly")
+        })
+
+        check("ping line with no sample", HudText.ping(-1, -1) == "·")
+        check("ping line last only", HudText.ping(52, -1) == "52ms")
+        check("ping line with average", HudText.ping(52, 61) == "52ms (avg 61)")
+        check("loss line renders both directions", HudText.loss(0, 15) == "↑0.0% ↓1.5%")
+        check("loss line tolerates missing samples", HudText.loss(-1, -1) == "↑· ↓·")
+        check("throughput scales to K/M", HudText.throughput(2048, 3L * 1024 * 1024) == "↑2K ↓3.0M")
+        check("throughput keeps small values in bytes", HudText.throughput(512, 0) == "↑512B ↓0B")
+        check("phase line shows idle seconds", HudText.phase("PLAY", 7) == "PLAY · 7s idle")
+        check("phase line without idle", HudText.phase("PLAY", 0) == "PLAY")
+        check("jitter line", HudText.jitter(12, 30) == "12 / 30ms")
+    }
+
+    private fun hudLayoutChecks() {
+        // 1080x2400 screen, a 220x120 panel.
+        val (tlX, tlY) = HudLayout.anchorPosition(HudCorner.TOP_START, 1080, 2400, 220, 120)
+        check("top-start anchored with margin", tlX == HudLayout.MARGIN_X && tlY == HudLayout.MARGIN_Y)
+        val (trX, _) = HudLayout.anchorPosition(HudCorner.TOP_END, 1080, 2400, 220, 120)
+        check("top-end hugs the right edge", trX == 1080 - 220 - HudLayout.MARGIN_X, "got $trX")
+        val (_, blY) = HudLayout.anchorPosition(HudCorner.BOTTOM_START, 1080, 2400, 220, 120)
+        check("bottom-start hugs the bottom edge", blY == 2400 - 120 - HudLayout.MARGIN_Y, "got $blY")
+
+        val clamped = HudLayout.clamp(-50, -50, 1080, 2400, 220, 120)
+        check("negative position clamped to zero", clamped.first == 0 && clamped.second == 0)
+        val clampedFar = HudLayout.clamp(5000, 9000, 1080, 2400, 220, 120)
+        check("off-screen position clamped inside", clampedFar.first == 860 && clampedFar.second == 2280)
+
+        check("nearest corner top-start", HudLayout.nearestCorner(10, 10, 1080, 2400, 220, 120) == HudCorner.TOP_START)
+        check("nearest corner top-end", HudLayout.nearestCorner(900, 10, 1080, 2400, 220, 120) == HudCorner.TOP_END)
+        check("nearest corner bottom-start", HudLayout.nearestCorner(10, 2300, 1080, 2400, 220, 120) == HudCorner.BOTTOM_START)
+        check("nearest corner bottom-end", HudLayout.nearestCorner(900, 2300, 1080, 2400, 220, 120) == HudCorner.BOTTOM_END)
+        // A view whose centre sits just below the screen's midpoint belongs to the
+        // bottom half even when the finger is near the left edge.
+        check(
+            "view centre decides the half, not the top-left corner",
+            HudLayout.nearestCorner(100, 1200, 1080, 2400, 220, 120) == HudCorner.BOTTOM_START
+        )
+        check(
+            "view straddling the midpoint counts as top",
+            HudLayout.nearestCorner(100, 1100, 1080, 2400, 220, 120) == HudCorner.TOP_START
+        )
+
+        val (settled, corner) = HudLayout.settle(900, 2300, 1080, 2400, 220, 120, snapToCorner = true)
+        check("snap returns the corner", corner == HudCorner.BOTTOM_END)
+        check("snap pins to the anchor", settled.first == 1080 - 220 - HudLayout.MARGIN_X && settled.second == 2400 - 120 - HudLayout.MARGIN_Y)
+
+        val (free, freeCorner) = HudLayout.settle(500, 300, 1080, 2400, 220, 120, snapToCorner = false)
+        check("free placement is kept", free.first == 500 && free.second == 300)
+        check("free placement still reports a corner", freeCorner == HudCorner.TOP_END)
+
+        // A panel larger than the screen must not produce negative coordinates.
+        val big = HudLayout.clamp(100, 100, 200, 200, 400, 400)
+        check("oversized panel pins to origin", big.first == 0 && big.second == 0)
+    }
+
+    private fun hudHistoryChecks() {
+        val ring = SampleRing(capacity = 3)
+        check("empty ring has no samples", ring.size == 0 && ring.last() == -1)
+        ring.add(50)
+        check("first sample readable", ring.last() == 50 && ring.size == 1)
+        ring.add(60)
+        ring.add(70)
+        check("ring fills in order", ring.toList() == listOf(50, 60, 70))
+        ring.add(80)
+        check("ring drops the oldest", ring.toList() == listOf(60, 70, 80), "got ${ring.toList()}")
+        check("mean ignores nothing when all measured", ring.mean() == 70)
+
+        val gaps = SampleRing(capacity = 4)
+        gaps.add(-1)
+        gaps.add(40)
+        gaps.add(-1)
+        check("mean ignores missing samples", gaps.mean() == 40, "got ${gaps.mean()}")
+        check("bars stay inside the height", gaps.bars(10, 160).all { it in 0..10 })
+        check("missing samples draw nothing", gaps.bars(10, 160)[0] == 0)
+        check("bars scale against the ceiling", gaps.bars(10, 80)[1] == 5, "got ${gaps.bars(10, 80)[1]}")
+        check("a value above the ceiling is capped", SampleRing(2).also { it.add(1000) }.bars(10, 80)[0] == 10)
+        check("empty ring draws no bars", SampleRing(2).bars(10, 80).isEmpty())
+
+        val history = StatsHistory(capacity = 2)
+        history.record(50, 5, 1024, 2048)
+        history.record(60, 6, 1024, 2048)
+        check("history records latency", history.latency.toList() == listOf(50, 60))
+        check("history records rates", history.upstreamRate.last() == 1024 && history.downstreamRate.last() == 2048)
+        history.clear()
+        check("history clears", history.latency.size == 0 && history.jitter.size == 0)
+        check("history tolerates huge rates", run {
+            history.record(50, 5, Long.MAX_VALUE, Long.MAX_VALUE)
+            history.upstreamRate.last() == Int.MAX_VALUE
+        })
     }
 
     // ------------------------------------------------- synthetic packet builders
