@@ -1,0 +1,36 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Celestia UI",
+    "description": "Celestia's palette on the game's own HUD, plus a small accent rule and badge. Cosmetic only: no data is added or revealed.",
+    "uuid": "363ab65d-23b6-464b-9610-55bc854b86bd",
+    "version": [
+      0,
+      1,
+      0
+    ],
+    "min_engine_version": [
+      1,
+      21,
+      0
+    ]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "79f07753-d68d-4012-8f30-b5e9dca65e0c",
+      "version": [
+        0,
+        1,
+        0
+      ]
+    }
+  ],
+  "metadata": {
+    "authors": [
+      "Celestia-client"
+    ],
+    "license": "MIT",
+    "product_type": "addon"
+  }
+}
