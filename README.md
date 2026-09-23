@@ -22,6 +22,10 @@ and reports what your connection is actually doing.
   player counts, plus negotiated MTU and the client's RakNet protocol version.
 - **Connection phase**: handshake → login → encrypted → play, visible because the Bedrock
   handshake is cleartext before encryption starts.
+- **Music widget** — shows what is playing and controls it (⏮ ⏯ ⏭) from the HUD, so a
+  song started before the game keeps going without leaving Minecraft. It drives the player
+  you are already signed into; no account is connected to this app, so there is no
+  credential here to leak. See [Music while you play](#music-while-you-play).
 - **Honest handling of traffic it does not relay**: TCP and everything else that isn't
   UDP gets an ICMP "administratively prohibited" reply so it fails immediately and
   visibly instead of hanging until it times out.
@@ -127,7 +131,8 @@ An optional stats HUD drawn over the game (`SYSTEM_ALERT_WINDOW`), plus a click 
 configure it:
 
 - modules: **Ping, Jitter, Packet loss, Throughput, Graph, Session state, Target, Server
-  info, Login, Handshake** — every one a report on the relay's own measurements;
+  info, Login, Handshake, Music** — all but Music report the relay's own measurements;
+  Music is the one module that reads something outside the relay, and it says why (below);
 - drag it anywhere, snap to a corner (or turn snapping off), remembered between launches;
 - a round floating button opens the panel: module switches, corner chips, reset, close.
 
@@ -135,6 +140,33 @@ It deliberately cannot show coordinates, inventory, armour, effects or chat (the
 encrypted game packets), the game's FPS (Android exposes no API for another app's frame rate),
 or keystrokes (that needs input hooks). The panel says so in one line instead of leaving the
 absence unexplained.
+
+## Music while you play
+
+The **Music** module (off by default) turns the HUD into a now-playing widget: title,
+artist · album, progress and artwork, plus **⏮ ⏯ ⏭** for whichever player is running —
+Spotify, YouTube Music on a paid tier, a local player, an internet radio stream.
+
+- a live stream shows **LIVE** instead of a progress bar, and buttons the player doesn't
+  advertise are greyed out rather than pressed into nothing;
+- the widget renders only when something is actually playing, and only redraws when the
+  track, position or play state changes — artwork is decoded once per track and cached;
+- **no account is connected to this app.** It drives whatever you are already signed into,
+  so it cannot leak a password: there is nothing stored because nothing is linked.
+
+Why it asks for a permission that sounds alarming: Android hands out media sessions only to
+system apps or to an **enabled notification listener**, so that grant is the only way an
+ordinary app can see or control another app's playback — there is no narrower one. The
+listener registered here does nothing else: it holds the grant and never overrides
+`onNotificationPosted`, so it cannot see notification content at all. That is the difference
+between a music widget and an app that can read your messages, and a test asserts it. The
+panel explains the wording before opening the settings page, and revoking the access simply
+leaves the module empty.
+
+What it cannot do: make YouTube or YouTube Music play in the background on the free tier.
+Those apps enforce that server-side, so background playback there is a paid feature rather
+than something a client can add — the widget will happily control YouTube Music *n* a paid
+tier, and Spotify on any tier.
 
 ## Control panel
 
