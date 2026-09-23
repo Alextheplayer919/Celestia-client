@@ -165,7 +165,7 @@ leaves the module empty.
 
 What it cannot do: make YouTube or YouTube Music play in the background on the free tier.
 Those apps enforce that server-side, so background playback there is a paid feature rather
-than something a client can add — the widget will happily control YouTube Music *n* a paid
+than something a client can add — the widget will happily control YouTube Music on a paid
 tier, and Spotify on any tier.
 
 ## Control panel
