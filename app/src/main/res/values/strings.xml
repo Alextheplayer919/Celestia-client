@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Celestia</string>
+
+    <string name="notification_channel_name">Proxy status</string>
+    <string name="notification_channel_description">Shows connection statistics while the proxy is relaying Minecraft traffic.</string>
+    <string name="notification_title">Celestia proxy</string>
+    <string name="notification_starting">Starting…</string>
+    <string name="notification_idle">Waiting for Minecraft traffic</string>
+    <string name="notification_action_stop">Stop</string>
+</resources>

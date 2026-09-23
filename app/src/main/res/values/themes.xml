@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+        MainActivity uses AppCompatActivity, which refuses to start unless the
+        activity theme is a Theme.AppCompat descendant (otherwise it throws
+        "You need to use a Theme.AppCompat theme (or descendant) with this
+        activity" before the first screen is drawn).
+    -->
+    <style name="Theme.Celestia" parent="Theme.AppCompat.DayNight.NoActionBar" />
+</resources>
