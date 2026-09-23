@@ -124,7 +124,47 @@ the fallback, and their workflow is the reference for doing it.
   instruction.
 - **Reading game data post-handshake.** Not a choice so much as a consequence: see §4.
 
-## 4. Consequence for the decode roadmap
+## 4. The control panel (what the UI study changed)
+
+Eclient's app is Jetpack Compose with Material 3 and a dark palette (Catppuccin
+Mocha: `#181825`/`#1E1E2E` fills, `#CBA6F7` mauve accent), built from a dashboard
+of cards: a header with the version, a `SelectedServerCard` that opens a server
+panel, a `SelectedApplicationCard` that opens an app picker, and one large
+connect button.
+
+What was taken:
+
+- **The structure.** Target server card, app card, session card, one primary
+  action — instead of a flat text dump. Their card-per-concern layout is the part
+  that makes the app readable at a glance.
+- **`ServerConfig`'s behaviour**: a saved host/port, validation, and a
+  de-duplicated, newest-first list of the last five servers kept next to the
+  current one (`net/Targets.kt` in this repo, plus chips in the UI). Their
+  defaults differ — this app has no default server, because a relay that silently
+  points somewhere is a bad default.
+- **The app picker**: list what is installed, show label/package/version, search,
+  and remember the choice. Ours filters to Minecraft-like packages first and
+  offers "show all installed apps" as an opt-in.
+- **`LanServerScanner`**: they listen for LAN pongs to find worlds; ours does the
+  broadcast/collect half (`net/LanDiscovery.kt`) so a target can be picked from a
+  "Scan network" button. Their version exists to feed a relay that advertises
+  itself; ours exists to fill in an address.
+
+What was not taken:
+
+- **Compose.** Material Components (views) 1.12.0 gives the same Material 3
+  theming, cards, switches, chips and text fields on top of the AppCompat setup
+  this project already had, with no new build tooling. The palette here is its own
+  (dark slate, blue/violet accent) rather than a copy of theirs.
+- **Their palette values and Compose theme code** — the *idea* of a dark, coloured
+  panel is taken; the colours are not, and neither is the module/feature surface
+  the dashboard is organised around.
+- **An overlay.** Their `ESPOverlayView` and overlay service exist to draw
+  gameplay information over the game. That is exactly the "reveals server-hidden
+  data"-adjacent surface this project rules out; the session view here shows only
+  what the relay can legitimately observe from the outside.
+
+## 5. Consequence for the decode roadmap
 
 The two roads are now clearly separated:
 
