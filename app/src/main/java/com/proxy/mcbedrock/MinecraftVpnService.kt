@@ -64,6 +64,13 @@ class MinecraftVpnService : VpnService() {
     @Volatile private var vpnEstablished = false
     @Volatile private var startupError: String? = null
 
+    // Target/scoping state, decided in startVpn() and published to the UI.
+    @Volatile private var targetLabel: String = ""
+    @Volatile private var scopeDescription: String = ""
+    @Volatile private var scopedToTarget: Boolean = false
+    @Volatile private var resolvedAddresses: List<String> = emptyList()
+    @Volatile private var relayedPackage: String = RelayConfigStore.DEFAULT_PACKAGE
+
     // Counters surfaced in the UI/notification.
     private var droppedNonUdp = 0L
     private var icmpRejections = 0L
@@ -100,24 +107,51 @@ class MinecraftVpnService : VpnService() {
     }
 
     private fun startVpn() {
+        val config = RelayConfigStore(this)
+        val target = config.target()
         val builder = Builder()
             .setSession(getString(R.string.app_name))
             .addAddress(VPN_ADDRESS, 32)
+            .setMtu(TUN_MTU)
+
+        // Scoped mode routes only the chosen server's address into the tunnel, so
+        // DNS, other apps and every other destination are left completely alone.
+        // That is only possible once the address is known as an IP, hence the
+        // resolution here; when it fails (or no target was chosen) the relay falls
+        // back to the capture-everything mode it has always used.
+        val resolved = if (config.scopeToServer && config.hasTarget()) resolveTarget(target.host) else emptyList()
+        scopedToTarget = resolved.isNotEmpty()
+
+        if (scopedToTarget) {
+            resolved.forEach { address -> builder.addRoute(address.hostAddress ?: "", 32) }
+            resolvedAddresses = resolved.mapNotNull { it.hostAddress }
+            scopeDescription = "only ${target.label()} (${resolvedAddresses.joinToString(", ")})"
+            Log.i(TAG, "Scoped tunnel to ${resolvedAddresses.joinToString(", ")}")
+        } else {
             // All IPv4 traffic from the allowed app is captured; only UDP is relayed,
             // everything else is answered with ICMP so it fails fast.
-            .addRoute(VPN_ROUTE, 0)
-            .setMtu(TUN_MTU)
+            builder.addRoute(VPN_ROUTE, 0)
             // Minecraft resolves server hostnames through the system resolver, which
             // follows the VPN. Without DNS servers declared here, name resolution
-            // breaks for "play.example.com" style addresses.
-            .addDnsServer(DNS_PRIMARY)
-            .addDnsServer(DNS_SECONDARY)
+            // breaks for "play.example.com" style addresses. In scoped mode DNS is
+            // deliberately *not* routed, so the system resolver keeps working.
+            builder.addDnsServer(DNS_PRIMARY)
+            builder.addDnsServer(DNS_SECONDARY)
+            resolvedAddresses = emptyList()
+            scopeDescription = when {
+                config.scopeToServer && config.hasTarget() -> "all traffic (could not resolve ${target.host})"
+                else -> "all traffic from the app"
+            }
+        }
+
+        targetLabel = if (config.hasTarget()) target.label() else "no target set"
+        relayedPackage = config.packageName
 
         try {
-            builder.addAllowedApplication(MINECRAFT_PACKAGE)
+            builder.addAllowedApplication(relayedPackage)
         } catch (e: PackageManager.NameNotFoundException) {
             // Capturing every app's traffic would be far worse than not starting.
-            fail(ERROR_MINECRAFT_MISSING)
+            fail(relayedPackage + ERROR_APP_MISSING_SUFFIX)
             return
         }
 
@@ -135,9 +169,21 @@ class MinecraftVpnService : VpnService() {
 
         vpnInterface = iface
         vpnEstablished = true
-        Log.i(TAG, "VPN established, relaying ${MINECRAFT_PACKAGE} UDP traffic")
+        Log.i(TAG, "VPN established, relaying ${relayedPackage} UDP traffic")
 
         serviceScope.launch { relayLoop(iface) }
+    }
+
+    /**
+     * Resolves the target host to IPv4 addresses for route scoping. Bedrock traffic
+     * is UDP over IPv4 here, and servers often publish several A records, so all of
+     * them are routed rather than just the first.
+     */
+    private fun resolveTarget(host: String): List<InetAddress> = try {
+        InetAddress.getAllByName(host).filter { it is java.net.Inet4Address }
+    } catch (e: Exception) {
+        Log.w(TAG, "Could not resolve $host", e)
+        emptyList()
     }
 
     /**
@@ -274,6 +320,17 @@ class MinecraftVpnService : VpnService() {
         }
     }
 
+    /** `Minecraft 1.26.40 (com.mojang.minecraftpe)` for the UI, or the raw package. */
+    private fun appDescription(): String {
+        val label = InstalledApps.label(this, relayedPackage)
+        val version = InstalledApps.versionName(this, relayedPackage)
+        return when {
+            label != null && version != null -> "$label $version ($relayedPackage)"
+            label != null -> "$label ($relayedPackage)"
+            else -> relayedPackage
+        }
+    }
+
     private fun startStatsPublisher() {
         serviceScope.launch {
             while (serviceScope.isActive) {
@@ -326,6 +383,11 @@ class MinecraftVpnService : VpnService() {
 
         val stats = ServiceStats(
             vpnEstablished = vpnEstablished,
+            targetLabel = targetLabel,
+            scopeDescription = scopeDescription,
+            scopedToTarget = scopedToTarget,
+            resolvedAddresses = resolvedAddresses,
+            appDescription = appDescription(),
             flows = flows,
             totalUpstreamBytes = totalUp,
             totalDownstreamBytes = totalDown,
@@ -412,6 +474,7 @@ class MinecraftVpnService : VpnService() {
 
         val flow = stats.flows.first()
         val parts = mutableListOf<String>()
+        if (stats.targetLabel.isNotBlank()) parts += stats.targetLabel
         parts += stats.flows.size.let { if (it == 1) "1 flow" else "$it flows" }
         parts += Format.rtt(flow.rttLastMs)
         parts += "loss ${Format.loss(max(flow.upstreamLossPermille, flow.downstreamLossPermille))}"
@@ -482,21 +545,13 @@ class MinecraftVpnService : VpnService() {
         private const val REAPER_INTERVAL_MS = 30_000L
         private const val STATS_INTERVAL_MS = 1_000L
 
-        /**
-         * Standard Bedrock package name. A different build (Preview, sideloaded)
-         * needs its own name here; if the package is not installed the service
-         * refuses to start rather than capturing every app's traffic.
-         */
-        private const val MINECRAFT_PACKAGE = "com.mojang.minecraftpe"
-
         // DNS has to be declared or hostname resolution inside Minecraft breaks
         // while the VPN is up. These are only used for names the client resolves
         // itself (e.g. play.example.com); they are not used for gameplay traffic.
         private const val DNS_PRIMARY = "1.1.1.1"
         private const val DNS_SECONDARY = "8.8.8.8"
 
-        private const val ERROR_MINECRAFT_MISSING =
-            "Minecraft ($MINECRAFT_PACKAGE) is not installed — nothing to proxy."
+        private const val ERROR_APP_MISSING_SUFFIX = " is not installed — pick another app."
         private const val ERROR_VPN_DENIED =
             "VPN permission was not granted, so the proxy cannot capture the game's traffic."
     }

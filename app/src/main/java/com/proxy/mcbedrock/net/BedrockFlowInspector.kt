@@ -420,17 +420,12 @@ class BedrockFlowInspector(
      * fall back to showing the raw string.)
      */
     private fun parseServerAdvertisement(raw: String?) {
-        if (raw.isNullOrEmpty()) return
-        val parts = raw.split(';')
-        if (parts.size < 6) {
-            serverMotd = raw
-            return
-        }
-        serverMotd = parts[1].ifBlank { null }
-        serverProtocol = parts[2].toIntOrNull() ?: -1
-        serverVersion = parts[3].ifBlank { null }
-        serverPlayers = parts[4].toIntOrNull() ?: -1
-        serverMaxPlayers = parts[5].toIntOrNull() ?: -1
+        val advert = ServerAdvertisement.parse(raw) ?: return
+        serverMotd = advert.motd
+        serverProtocol = advert.protocolVersion
+        serverVersion = advert.mcVersion
+        serverPlayers = advert.players
+        serverMaxPlayers = advert.maxPlayers
     }
 
     fun shortLabel(): String {
