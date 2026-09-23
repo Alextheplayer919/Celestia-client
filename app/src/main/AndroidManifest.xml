@@ -59,6 +59,22 @@
             </intent-filter>
         </activity>
 
+        <!--
+            Holds the notification-listener grant, which is the only way a normal app
+            can read media sessions (see NowPlayingBridge). The service itself never
+            looks at notification content: it exists for the permission, and the
+            media bridge does everything else.
+        -->
+        <service
+            android:name=".music.NowPlayingListenerService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".hud.HudOverlayService"
             android:exported="false"

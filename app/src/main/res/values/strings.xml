@@ -75,6 +75,13 @@
     <string name="hud_switch_fab">Floating button</string>
     <string name="hud_switch_snap">Snap to nearest corner</string>
     <string name="hud_modules_label">Lines</string>
+    <string name="hud_music_title">Music</string>
+    <string name="hud_music_permission">Needs notification access to see and control your player. Android describes this as reading all notifications; this app only ever reads media sessions and never looks at notification content.</string>
+    <string name="hud_music_grant">Open notification access</string>
+    <string name="action_music_prev">Previous track</string>
+    <string name="action_music_play_pause">Play or pause</string>
+    <string name="action_music_next">Next track</string>
+    <string name="music_nothing">nothing playing</string>
     <string name="action_browse_servers">Browse servers</string>
     <string name="servers_title">Servers</string>
     <string name="servers_intro">Convenience list only: nothing is probed or queried for this. Featured servers need Xbox sign-in and are partnered servers — a relay that logs in as this app may be refused there, while the transparent relay works normally.</string>

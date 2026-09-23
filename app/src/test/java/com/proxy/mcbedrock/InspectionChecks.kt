@@ -5,6 +5,9 @@ import com.proxy.mcbedrock.net.BedrockBatchReader
 import com.proxy.mcbedrock.net.BedrockFlowInspector
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.ConnectionStats
+import com.proxy.mcbedrock.music.NowPlaying
+import com.proxy.mcbedrock.music.TransportActions
+import com.proxy.mcbedrock.music.NowPlayingText
 import com.proxy.mcbedrock.net.OverheadTracker
 import com.proxy.mcbedrock.net.ServerDirectory
 import com.proxy.mcbedrock.net.ServerPreset
@@ -83,6 +86,7 @@ object InspectionChecks {
         overheadChecks()
         pingLedgerChecks()
         serverDirectoryChecks()
+        nowPlayingChecks()
         sessionReportChecks()
         hudLayoutChecks()
         hudHistoryChecks()
@@ -371,6 +375,74 @@ object InspectionChecks {
             phase = "HANDSHAKE"
         )))
         check("summary falls back to the phase", SessionReport.summary(quiet) == "HANDSHAKE")
+    }
+
+    // ------------------------------------------------------------- music widget
+
+    private fun nowPlayingChecks() {
+        val empty = NowPlaying.EMPTY
+        check("an empty state has nothing", !empty.hasAnything)
+        check("an empty state reports no duration", empty.progress == null)
+        check("an empty state cannot control anything", !empty.canPlayPause && !empty.canSkipNext && !empty.canSkipPrevious)
+        check("empty state describes itself", NowPlayingText.describe(empty) == "nothing playing")
+        check("empty subtitle is not blank", NowPlayingText.subtitle(empty) == "unknown artist")
+        check("empty progress reads as live", NowPlayingText.progress(empty) == "LIVE")
+
+        val playing = NowPlaying(
+            title = "Song Name",
+            artist = "Artist",
+            album = "Album",
+            isPlaying = true,
+            positionMs = 63_000,
+            durationMs = 225_000,
+            actions = 0L,
+            trackKey = "pkg|Song Name|Artist|Album"
+        )
+        check("playing state has content", playing.hasAnything)
+        check("progress is a fraction", playing.progress != null && kotlin.math.abs(playing.progress!! - 0.28f) < 0.01f,
+            "got ${playing.progress}")
+        check("subtitle joins artist and album", NowPlayingText.subtitle(playing) == "Artist · Album")
+        check("progress shows position and length", NowPlayingText.progress(playing) == "1:03 / 3:45")
+        check("describe mentions the state", NowPlayingText.describe(playing).contains("playing"))
+        check("describe falls back to a clock", NowPlayingText.describe(empty.copy(title = "x")).contains("LIVE"))
+
+        check("clock formats minutes", NowPlayingText.clock(225_000) == "3:45")
+        check("clock pads seconds", NowPlayingText.clock(65_000) == "1:05")
+        check("clock handles hours", NowPlayingText.clock(3_725_000) == "1:02:05")
+        check("clock refuses zero", NowPlayingText.clock(0) == "--:--")
+        check("clock refuses negatives", NowPlayingText.clock(-5) == "--:--")
+
+        // Action gating is what decides which buttons look enabled.
+        val noActions = playing.copy(actions = 0L)
+        check("no actions means no controls", !noActions.canPlayPause && !noActions.canSkipNext)
+        val fullActions = playing.copy(
+            actions = TransportActions.PLAY_PAUSE or
+                TransportActions.SKIP_TO_NEXT or
+                TransportActions.SKIP_TO_PREVIOUS
+        )
+        check("play/pause detected", fullActions.canPlayPause)
+        check("next detected", fullActions.canSkipNext)
+        check("previous detected", fullActions.canSkipPrevious)
+        val playOnly = playing.copy(actions = TransportActions.PLAY)
+        check("a play-only player still offers play/pause", playOnly.canPlayPause)
+        check("a play-only player has no next", !playOnly.canSkipNext)
+
+        // A live stream reports no duration; the widget must not draw a fake progress bar.
+        val live = playing.copy(durationMs = 0L)
+        check("live stream has no progress fraction", live.progress == null)
+        check("live stream reads LIVE", NowPlayingText.progress(live) == "LIVE")
+        check("a position beyond the duration is clamped", playing.copy(positionMs = 999_999).progress == 1f)
+
+        // Long titles: cut at a word boundary and mark it.
+        val long = "Song (Remastered 2011) (feat. Someone) [Official Audio]"
+        val fitted = NowPlayingText.fit(long, 34)
+        check("long titles are shortened", fitted.length <= 35, "got ${fitted.length}: $fitted")
+        check("shortening is marked", fitted.endsWith("…"))
+        check("short titles are untouched", NowPlayingText.fit("Short", 34) == "Short")
+        check("fitting trims surrounding space", NowPlayingText.fit("  padded  ", 34) == "padded")
+        check("fitting never returns empty for a long word", NowPlayingText.fit("a".repeat(60), 10).isNotEmpty())
+        check("unknown artist placeholders are dropped",
+            NowPlayingText.subtitle(playing.copy(artist = "<unknown>", album = "")) == "unknown artist")
     }
 
     private fun check(name: String, condition: Boolean, extra: String = "") {
