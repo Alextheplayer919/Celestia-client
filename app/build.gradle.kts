@@ -11,8 +11,8 @@ android {
         applicationId = "com.proxy.mcbedrock"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1-skeleton"
+        versionCode = 2
+        versionName = "0.2-relay"
     }
 
     buildTypes {
@@ -28,6 +28,10 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = false
+    }
 }
 
 dependencies {
@@ -35,9 +39,12 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
-    // Bedrock RakNet + game protocol decoding (read-only packet parsing).
-    // TODO: pin an actual released version once you're wiring in real decoding —
-    // check https://github.com/CloudburstMC/Protocol for current coordinates.
+    // Bedrock protocol decoding (read-only) is not wired in yet. When it is, the
+    // coordinates are org.cloudburstmc.protocol:{common,bedrock-codec,bedrock-connection}
+    // from https://repo.opencollab.dev/maven-snapshots — see docs/decode-research.md
+    // for the exact pinned version and why a decoder alone cannot read an encrypted
+    // session.
     // implementation("org.cloudburstmc.protocol:bedrock-codec:VERSION")
-    // implementation("org.cloudburstmc.protocol:bedrock-connection:VERSION")
+
+    testImplementation("junit:junit:4.13.2")
 }

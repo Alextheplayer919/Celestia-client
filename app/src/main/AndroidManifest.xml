@@ -3,16 +3,26 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!--
+        The service runs as a foreground service for as long as the tunnel is up.
+        Android 14 (targetSdk 34) requires a declared foreground service *type* for
+        any FGS; there is no "vpn" type, and systemExempted is reserved for
+        system-level VPN integrations, so specialUse is the type for an
+        app-installed VpnService.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
-        android:label="Bedrock Proxy"
         android:allowBackup="false"
-        android:supportsRtl="true">
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Celestia">
 
         <activity
             android:name=".MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:label="@string/app_name">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -21,11 +31,15 @@
 
         <service
             android:name=".MinecraftVpnService"
-            android:permission="android.permission.BIND_VPN_SERVICE"
-            android:exported="false">
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Relays the user's own Minecraft Bedrock UDP traffic in order to show connection statistics for their session." />
         </service>
 
     </application>
