@@ -1,0 +1,85 @@
+{
+  "namespace": "celestia",
+
+  // Everything is measured from an anchor, so tuning the whole pack is these numbers.
+  "celestia_badge_offset|default": [0, -52],
+  "celestia_rule_offset|default": [0, -38],
+  "celestia_rule_width|default": 182,
+  "celestia_accent_color|default": [0.302, 0.639, 1.0],
+  "celestia_panel_color|default": [0.063, 0.102, 0.141],
+  "celestia_text_color|default": [0.760, 0.812, 0.890],
+
+  // A thin accent rule, sitting just above the hotbar.
+  "celestia_rule": {
+    "type": "image",
+    "texture": "textures/ui/Black",
+    "color": "$celestia_accent_color",
+    "alpha": 0.85,
+    "size": ["$celestia_rule_width", 1],
+    "anchor_from": "bottom_middle",
+    "anchor_to": "bottom_middle",
+    "offset": "$celestia_rule_offset",
+    "layer": 4
+  },
+
+  // Small badge with the client's name. Text only: nothing here reads game state.
+  "celestia_badge": {
+    "type": "panel",
+    "size": [74, 16],
+    "anchor_from": "bottom_middle",
+    "anchor_to": "bottom_middle",
+    "offset": "$celestia_badge_offset",
+    "layer": 5,
+    "controls": [
+      {
+        "backdrop": {
+          "type": "image",
+          "texture": "textures/ui/Black",
+          "color": "$celestia_panel_color",
+          "alpha": 0.70,
+          "size": ["100%", "100%"],
+          "layer": 1
+        }
+      },
+      {
+        "edge": {
+          "type": "image",
+          "texture": "textures/ui/Black",
+          "color": "$celestia_accent_color",
+          "alpha": 0.95,
+          "size": [2, "100%"],
+          "anchor_from": "left_middle",
+          "anchor_to": "left_middle",
+          "layer": 2
+        }
+      },
+      {
+        "name": {
+          "type": "label",
+          "text": "Celestia",
+          "color": "$celestia_text_color",
+          "font_scale_factor": 0.7,
+          "anchor_from": "left_middle",
+          "anchor_to": "left_middle",
+          "offset": [7, 0],
+          "layer": 3
+        }
+      }
+    ]
+  },
+
+  "root_panel": {
+    "modifications": [
+      {
+        "array_name": "controls",
+        "operation": "insert_front",
+        "value": { "celestia_rule@celestia.celestia_rule": {} }
+      },
+      {
+        "array_name": "controls",
+        "operation": "insert_front",
+        "value": { "celestia_badge@celestia.celestia_badge": {} }
+      }
+    ]
+  }
+}
