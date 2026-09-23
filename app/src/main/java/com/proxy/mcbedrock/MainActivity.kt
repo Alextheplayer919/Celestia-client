@@ -33,6 +33,8 @@ import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
 import com.proxy.mcbedrock.hud.HudOverlayService
+import com.proxy.mcbedrock.net.ServerDirectory
+import com.proxy.mcbedrock.net.ServerPreset
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.LanDiscovery
 import com.proxy.mcbedrock.net.ServerTarget
@@ -76,6 +78,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var emptyHint: TextView
     private lateinit var summaryLine: TextView
     private lateinit var statsText: TextView
+    private lateinit var browseServersButton: MaterialButton
+    private lateinit var shareReportButton: MaterialButton
+    private lateinit var copyReportButton: MaterialButton
     private lateinit var wifiLatencySwitch: MaterialSwitch
     private lateinit var hudSwitch: MaterialSwitch
     private lateinit var hudPanelButton: MaterialButton
@@ -150,9 +155,15 @@ class MainActivity : AppCompatActivity() {
         emptyHint = findViewById(R.id.emptyHint)
         summaryLine = findViewById(R.id.summaryLine)
         statsText = findViewById(R.id.statsText)
+        browseServersButton = findViewById(R.id.browseServersButton)
+        shareReportButton = findViewById(R.id.shareReportButton)
+        copyReportButton = findViewById(R.id.copyReportButton)
         wifiLatencySwitch = findViewById(R.id.wifiLatencySwitch)
         wifiLatencySwitch.isChecked = config.lowLatencyWifi
         wifiLatencySwitch.setOnCheckedChangeListener { _, checked -> config.lowLatencyWifi = checked }
+        browseServersButton.setOnClickListener { openServerPicker() }
+        shareReportButton.setOnClickListener { shareReport() }
+        copyReportButton.setOnClickListener { copyReport() }
         hudSwitch = findViewById(R.id.hudSwitch)
         hudPanelButton = findViewById(R.id.hudPanelButton)
         hudStatus = findViewById(R.id.hudStatus)
@@ -346,6 +357,63 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ------------------------------------------------------------ server picker
+
+    /**
+     * Fills the target fields from the built-in list. Nothing is probed or fetched:
+     * the entries are constants, and the transport is still whatever the user picks.
+     */
+    private fun openServerPicker() {
+        val view = LayoutInflater.from(this).inflate(R.layout.dialog_server_picker, null)
+        val list = view.findViewById<RecyclerView>(R.id.serverList)
+        val adapter = ServerPresetAdapter(ServerDirectory.ordered()) { preset ->
+            hostInput.setText(preset.host)
+            portInput.setText(preset.port.toString())
+            config.saveTarget(preset.host, preset.port)
+            renderRecents()
+            updateServerStatus()
+            toast(getString(R.string.servers_picked, preset.address()))
+        }
+        list.layoutManager = LinearLayoutManager(this)
+        list.adapter = adapter
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.servers_title))
+            .setView(view)
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ------------------------------------------------------------- play test kit
+
+    /** Hands the session report to whatever the user picks: chat, notes, mail. */
+    private fun shareReport() {
+        val report = SessionReport.text(StatsRegistry.latest, sessionMinutes())
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, getString(R.string.report_share_title))
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.report_share_title)))
+    }
+
+    /** Same report, on the clipboard, for pasting anywhere. */
+    private fun copyReport() {
+        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        clipboard.setPrimaryClip(
+            android.content.ClipData.newPlainText(
+                getString(R.string.report_share_title),
+                SessionReport.text(StatsRegistry.latest, sessionMinutes())
+            )
+        )
+        toast(getString(R.string.report_copied))
+    }
+
+    /** Minutes since the relay was started, or -1 when it never ran in this app run. */
+    private fun sessionMinutes(): Long {
+        val started = relayStartedAtMillis ?: return -1
+        return (System.currentTimeMillis() - started) / 60_000
+    }
+
     // --------------------------------------------------------------- app picker
 
     private fun openAppPicker() {
@@ -408,6 +476,7 @@ class MainActivity : AppCompatActivity() {
             statusPillDetail.text = getString(R.string.error_mc_missing)
             return
         }
+        relayStartedAtMillis = System.currentTimeMillis()
         ContextCompat.startForegroundService(this, Intent(this, MinecraftVpnService::class.java))
     }
 
@@ -433,6 +502,9 @@ class MainActivity : AppCompatActivity() {
         }
         hudStatus.setTextColor(color(if (allowed) R.color.text_dim else R.color.warn))
     }
+
+    @Volatile
+    private var relayStartedAtMillis: Long? = null
 
     private fun requestNotificationsIfNeeded() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
@@ -580,6 +652,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ------------------------------------------------------------- app list rows
+
+    /** Rows for the built-in server list. */
+    private class ServerPresetAdapter(
+        private val presets: List<ServerPreset>,
+        private val onPick: (ServerPreset) -> Unit
+    ) : RecyclerView.Adapter<ServerPresetAdapter.Row>() {
+
+        class Row(view: View) : RecyclerView.ViewHolder(view) {
+            val name: TextView = view.findViewById(R.id.serverName)
+            val kind: TextView = view.findViewById(R.id.serverKind)
+            val address: TextView = view.findViewById(R.id.serverAddress)
+            val region: TextView = view.findViewById(R.id.serverRegion)
+        }
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Row {
+            val view = LayoutInflater.from(parent.context).inflate(R.layout.item_server, parent, false)
+            return Row(view)
+        }
+
+        override fun getItemCount(): Int = presets.size
+
+        override fun onBindViewHolder(holder: Row, position: Int) {
+            val preset = presets[position]
+            holder.name.text = preset.name
+            holder.kind.text = holder.itemView.context.getString(
+                if (preset.kind == ServerPreset.Kind.FEATURED) R.string.servers_kind_featured
+                else R.string.servers_kind_community
+            )
+            holder.address.text = preset.address()
+            holder.region.text = listOfNotNull(
+                preset.region.takeIf { it.isNotBlank() },
+                preset.note.takeIf { it.isNotBlank() }
+            ).joinToString("  ·  ")
+            holder.itemView.setOnClickListener { onPick(preset) }
+        }
+    }
 
     private class AppAdapter(
         private val onPick: (AppEntry) -> Unit

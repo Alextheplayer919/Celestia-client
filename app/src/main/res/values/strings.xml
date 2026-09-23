@@ -75,6 +75,16 @@
     <string name="hud_switch_fab">Floating button</string>
     <string name="hud_switch_snap">Snap to nearest corner</string>
     <string name="hud_modules_label">Lines</string>
+    <string name="action_browse_servers">Browse servers</string>
+    <string name="servers_title">Servers</string>
+    <string name="servers_intro">Convenience list only: nothing is probed or queried for this. Featured servers need Xbox sign-in and are partnered servers — a relay that logs in as this app may be refused there, while the transparent relay works normally.</string>
+    <string name="servers_kind_featured">Featured</string>
+    <string name="servers_kind_community">Community</string>
+    <string name="servers_picked">Target set to %1$s</string>
+    <string name="action_share_report">Share report</string>
+    <string name="action_copy_report">Copy</string>
+    <string name="report_copied">Report copied</string>
+    <string name="report_share_title">Share Celestia relay report</string>
     <string name="action_low_latency_wifi">Keep Wi-Fi out of power save</string>
     <string name="action_low_latency_wifi_hint">Wi-Fi power save is what turns a steady connection into 100-300 ms bursts. Turning this off saves battery but makes ping spikier.</string>
 </resources>

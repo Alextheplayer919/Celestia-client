@@ -6,6 +6,9 @@ import com.proxy.mcbedrock.net.BedrockFlowInspector
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.ConnectionStats
 import com.proxy.mcbedrock.net.OverheadTracker
+import com.proxy.mcbedrock.net.ServerDirectory
+import com.proxy.mcbedrock.net.ServerPreset
+import com.proxy.mcbedrock.SessionReport
 import com.proxy.mcbedrock.net.PingLedger
 import com.proxy.mcbedrock.hud.HudCorner
 import com.proxy.mcbedrock.hud.HudLayout
@@ -79,6 +82,8 @@ object InspectionChecks {
         hudModuleChecks()
         overheadChecks()
         pingLedgerChecks()
+        serverDirectoryChecks()
+        sessionReportChecks()
         hudLayoutChecks()
         hudHistoryChecks()
 
@@ -192,6 +197,180 @@ object InspectionChecks {
         check("a data packet is not mistaken for a ping", PingLedger.pingEcho(ByteArray(20).also { it[0] = 0x84.toByte() }, 0, 20) == null)
         check("a pong is not mistaken for a ping", PingLedger.pingEcho(pong, 0, pong.size) == null)
         check("a truncated packet is rejected", PingLedger.pongEcho(ByteArray(4), 0, 4) == null)
+    }
+
+    // ------------------------------------------- server directory and the report
+
+    private fun serverDirectoryChecks() {
+        val all = ServerDirectory.all
+        check("directory is not empty", all.isNotEmpty())
+        check("every host is unique", all.map { it.host.lowercase() }.toSet().size == all.size,
+            all.groupBy { it.host }.filter { it.value.size > 1 }.keys.toString())
+        check("every name is unique", all.map { it.name }.toSet().size == all.size)
+        check("every host passes target validation", all.all { TargetRules.validateHost(it.host) == null },
+            all.filter { TargetRules.validateHost(it.host) != null }.map { it.host }.toString())
+        check("every port is in range", all.all { it.port in 1..65535 })
+        check("hosts carry no scheme or path", all.none { it.host.contains("://") || it.host.contains("/") })
+        check("hosts carry no embedded port", all.none { it.host.contains(":") })
+        // The rule the picker depends on: the host must survive normalisation, and
+        // the port must either be written in the address or resolve to the default.
+        check("addresses round-trip through the parser", all.all {
+            TargetRules.normaliseHost(it.address()) == it.host &&
+                (TargetRules.hostEmbeddedPort(it.address()) ?: TargetRules.parsePort("")) == it.port
+        }, all.filterNot {
+            TargetRules.normaliseHost(it.address()) == it.host &&
+                (TargetRules.hostEmbeddedPort(it.address()) ?: TargetRules.parsePort("")) == it.port
+        }.map { it.address() }.toString())
+        check("a default-port address carries no port to read",
+            ServerDirectory.community.first { it.port == 2000 }.let { true })
+        check("only the non-default entry exposes an embedded port",
+            all.count { TargetRules.hostEmbeddedPort(it.address()) != null } == all.count { it.port != 19132 })
+        check("default-port addresses omit the port", all.filter { it.port == 19132 }.all { !it.address().contains(":") })
+        check("non-default ports are shown", all.filter { it.port != 19132 }.all { it.address().contains(":") })
+
+        val featured = ServerDirectory.featured
+        check("featured list is not empty", featured.isNotEmpty())
+        check("featured entries are marked as such", featured.all { it.kind == ServerPreset.Kind.FEATURED })
+        check("every featured entry warns about sign-in", featured.all { it.note.isNotBlank() })
+        check("featured addresses are the published ones",
+            featured.map { it.host }.containsAll(listOf(
+                "geo.hivebedrock.network", "mco.cubecraft.net", "mco.lbsg.net",
+                "play.inpvp.net", "play.galaxite.net", "play.enchanted.gg"
+            )))
+        check("no dead servers are listed", featured.none { it.host.contains("mineplex") })
+
+        check("community list is not empty", ServerDirectory.community.isNotEmpty())
+        check("community entries are marked as such", ServerDirectory.community.all { it.kind == ServerPreset.Kind.COMMUNITY })
+        check("the non-default port example keeps its port",
+            ServerDirectory.community.any { it.port == 2000 })
+        check("lookup by host works", ServerDirectory.byHost("geo.hivebedrock.network")?.name == "The Hive")
+        check("lookup is case-insensitive", ServerDirectory.byHost("GEO.HiveBedrock.NETWORK")?.name == "The Hive")
+        check("lookup trims whitespace", ServerDirectory.byHost("  play.nethergames.org ")?.name == "NetherGames")
+        check("unknown host returns null", ServerDirectory.byHost("nope.example.com") == null)
+        check("describe includes the address", ServerDirectory.featured.first().describe().contains("geo.hivebedrock.network"))
+        check("describe omits an empty note", ServerPreset("X", "x.com", note = "", region = "").describe() == "x.com")
+
+        val suggested = ServerDirectory.suggestedForPlayTest()
+        check("play-test server is a community server", suggested.kind == ServerPreset.Kind.COMMUNITY)
+        check("play-test server is in the directory", ServerDirectory.all.contains(suggested))
+    }
+
+    private fun emptyStats(): ServiceStats = ServiceStats(
+        vpnEstablished = true,
+        flows = emptyList(),
+        totalUpstreamBytes = 0,
+        totalDownstreamBytes = 0,
+        upstreamBytesPerSecond = 0,
+        downstreamBytesPerSecond = 0,
+        droppedNonUdp = 0,
+        icmpRejectionsSent = 0,
+        relayErrors = 0,
+        oversizedReplies = 0,
+        lastError = null
+    )
+
+    private fun sampleFlow(
+        rtt: Int = 58,
+        overhead: Double = 0.42,
+        serverRtt: Int = 41
+    ): FlowView = FlowView(
+        remoteLabel = "play.nethergames.org:19132",
+        phase = "PLAY",
+        serverDescription = "NG · 1.26.40 · 120/500",
+        rttLastMs = rtt,
+        rttMinMs = 44,
+        rttAvgMs = 61,
+        rttMaxMs = 92,
+        jitterMs = 12,
+        arrivalJitterMs = 30,
+        upstreamLossPermille = 0,
+        downstreamLossPermille = 15,
+        upstreamBytes = 1_048_576,
+        downstreamBytes = 8_388_608,
+        packets = 24_000,
+        mtu = 1400,
+        raknetProtocol = 11,
+        encryptionStarted = true,
+        loginDescription = "1.26.40, protocol 2168, as Steve",
+        protocolComparison = null,
+        encryptionDescription = "encrypted after handshake; relay cannot read gameplay",
+        idleSeconds = 2,
+        relayOverheadAvgMs = overhead,
+        relayOverheadP95Ms = 1.6,
+        serverRttLastMs = serverRtt,
+        serverRttMinMs = 38,
+        serverRttAvgMs = 45,
+        serverRttMaxMs = 71
+    )
+
+    private fun sessionReportChecks() {
+        val empty = emptyStats()
+        val emptyText = SessionReport.text(empty)
+        check("report names itself", emptyText.startsWith("Celestia relay report"))
+        check("report says when nothing was relayed", emptyText.contains("no flow was relayed"))
+        check("report admits maths it cannot do", emptyText.contains("no RTT samples"))
+        check("report states its own limits", emptyText.contains("Not measurable from outside the game"))
+        check("empty session still reports errors", emptyText.contains("relay errors:     0"))
+
+        val stats = emptyStats().copy(
+            targetLabel = "play.nethergames.org:19132",
+            scopeDescription = "target only",
+            scopedToTarget = true,
+            resolvedAddresses = listOf("51.83.129.10"),
+            appDescription = "Minecraft (1.26.40)",
+            flows = listOf(sampleFlow())
+        )
+        val text = SessionReport.text(stats, minutes = 12)
+        check("report carries the session length", text.contains("12 min"))
+        check("report carries the target", text.contains("play.nethergames.org:19132"))
+        check("report carries the resolved address", text.contains("51.83.129.10"))
+        check("report carries the rtt", text.contains("58ms / 61ms"))
+        check("report carries min and max", text.contains("44ms / 92ms"))
+        check("report carries jitter", text.contains("12ms (arrival jitter 30ms)"))
+        check("report carries the server-leg rtt", text.contains("server leg rtt:   41ms"))
+        check("report carries relay cost", text.contains("0.42ms average, 1.60ms p95"))
+        check("report carries loss", text.contains("0.0% / 1.5%"))
+        check("report carries datagram count", text.contains("24000"))
+        check("report does not warn below the threshold", !text.contains("likely hurting"))
+
+        val heavy = emptyStats().copy(flows = listOf(sampleFlow(overhead = 4.5)))
+        check("report warns when the relay is the problem",
+            SessionReport.text(heavy).contains("likely hurting more than helping"))
+
+        val json = SessionReport.json(stats, minutes = 12)
+        check("json is an object", json.trimStart().startsWith("{") && json.trimEnd().endsWith("}"))
+        check("json carries the report id", json.contains("\"report\": \"celestia-relay\""))
+        check("json carries numbers unquoted", json.contains("\"rttLastMs\": 58"))
+        check("json carries booleans unquoted", json.contains("\"scopedToTarget\": true"))
+        check("json carries arrays", json.contains("\"resolvedAddresses\": [\"51.83.129.10\"]"))
+        check("json quotes strings", json.contains("\"target\": \"play.nethergames.org:19132\""))
+        check("json escapes nothing it should not", !json.contains("\\u"))
+        check("json nulls a missing session length",
+            SessionReport.json(stats).contains("\"sessionMinutes\": null"))
+        check("json keeps null for absent values",
+            SessionReport.json(emptyStats()).contains("\"phase\": null"))
+
+        // A quote in a server description must not break the document.
+        val quoteStats = emptyStats().copy(targetLabel = "he said \"hi\"")
+        val quoted = SessionReport.json(quoteStats)
+        check("json escapes quotes", quoted.contains("he said \\\"hi\\\""))
+
+        val summary = SessionReport.summary(stats)
+        check("summary mentions rtt", summary.contains("58ms rtt"))
+        check("summary mentions jitter", summary.contains("12ms jitter"))
+        check("summary mentions relay cost", summary.contains("0.42ms relay"))
+        check("summary mentions loss", summary.contains("0.0%/1.5% loss"))
+        check("summary of an empty session says so", SessionReport.summary(empty) == "no flow relayed")
+
+        val quiet = emptyStats().copy(flows = listOf(sampleFlow().copy(
+            rttLastMs = -1,
+            jitterMs = -1,
+            relayOverheadAvgMs = 0.0,
+            upstreamLossPermille = 0,
+            downstreamLossPermille = 0,
+            phase = "HANDSHAKE"
+        )))
+        check("summary falls back to the phase", SessionReport.summary(quiet) == "HANDSHAKE")
     }
 
     private fun check(name: String, condition: Boolean, extra: String = "") {

@@ -143,6 +143,12 @@
                         android:layout_marginStart="8dp"
                         android:layout_weight="1"
                         android:text="@string/action_scan_lan" />
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/browseServersButton"
+                        style="@style/Widget.Material3.Button.TextButton"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/action_browse_servers" />
                 </LinearLayout>
 
                 <TextView
@@ -271,6 +277,30 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="@string/action_low_latency_wifi_hint" />
+
+        <!-- Play-test kit -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/shareReportButton"
+                style="@style/Widget.Material3.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/action_share_report" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/copyReportButton"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:text="@string/action_copy_report" />
+        </LinearLayout>
 
         <!-- In-game HUD -->
         <com.google.android.material.card.MaterialCardView
