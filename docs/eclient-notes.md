@@ -164,7 +164,33 @@ What was not taken:
   data"-adjacent surface this project rules out; the session view here shows only
   what the relay can legitimately observe from the outside.
 
-## 5. Consequence for the decode roadmap
+## 5. The overlay HUD and its module list
+
+Eclient's in-game UI is an overlay service, not part of the game: `TYPE_APPLICATION_OVERLAY`
+windows added with `WindowManager`, flags `FLAG_NOT_FOCUSABLE | FLAG_NOT_TOUCH_MODAL |
+FLAG_LAYOUT_IN_SCREEN | FLAG_LAYOUT_NO_LIMITS`, `PixelFormat.TRANSLUCENT`, gravity
+`TOP | START`, wrapped-content sizing, and a guarded `updateViewLayout` so a rejected move
+cannot take the service down. Their module system is a registry (`ModuleManager`) of
+`BaseModule`s carrying typed settings (bool/int/float/enum/string), an enable/disable flow,
+and per-element positions persisted separately (`OverlayPositions`) so dragging survives a
+restart.
+
+Taken, with the modules replaced by this project's own measurements:
+
+- the window mechanics above, including the guarded update and the drag/drag-end handling;
+- per-element position persistence (which corner the HUD hangs from), with clamping so it
+  cannot be dragged off screen;
+- a floating button that opens a click panel of module switches — their interaction model.
+
+Not taken: the modules. Theirs are combat/visual cheats that read decrypted game state. This
+relay has no decrypted game state to read (see §4), so the list is Ping, Jitter, Packet loss,
+Throughput, Graph, Session state, Target, Server info, Login, Handshake — all of them reports
+on the relay's own measurements. `InspectionChecks` asserts that no aura/esp/xray/fly-style
+module exists, so that cannot drift in unnoticed. Their ArmorHud-style modules (armour, health,
+inventory icons) are impossible here for the same reason coordinates are: the packets carrying
+them are encrypted end-to-end.
+
+## 6. Consequence for the decode roadmap
 
 The two roads are now clearly separated:
 

@@ -11,8 +11,8 @@ android {
         applicationId = "com.proxy.mcbedrock"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.3-panel"
+        versionCode = 4
+        versionName = "0.4-hud"
     }
 
     buildTypes {

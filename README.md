@@ -107,6 +107,21 @@ It can also be run without Android tooling at all: copy
 `app/src/test/java/com/proxy/mcbedrock/InspectionChecks.kt` into a directory with a
 `main` that calls `InspectionChecks.runAll(verbose = true)` and compile with `kotlinc`.
 
+## In-game HUD
+
+An optional stats HUD drawn over the game (`SYSTEM_ALERT_WINDOW`), plus a click panel to
+configure it:
+
+- modules: **Ping, Jitter, Packet loss, Throughput, Graph, Session state, Target, Server
+  info, Login, Handshake** — every one a report on the relay's own measurements;
+- drag it anywhere, snap to a corner (or turn snapping off), remembered between launches;
+- a round floating button opens the panel: module switches, corner chips, reset, close.
+
+It deliberately cannot show coordinates, inventory, armour, effects or chat (they are inside
+encrypted game packets), the game's FPS (Android exposes no API for another app's frame rate),
+or keystrokes (that needs input hooks). The panel says so in one line instead of leaving the
+absence unexplained.
+
 ## Control panel
 
 The app is a small control panel rather than a debug console:
