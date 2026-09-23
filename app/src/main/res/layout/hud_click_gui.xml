@@ -14,8 +14,11 @@
         android:orientation="vertical">
 
         <TextView
+            android:id="@+id/clickGuiTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
             android:text="@string/hud_panel_title"
             android:textColor="@color/accent"
             android:textSize="13sp"
@@ -26,6 +29,36 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
             android:text="@string/hud_panel_subtitle"
+            android:textColor="@color/text_dim"
+            android:textSize="10sp" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/clickGuiOverlaySwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/hud_switch_overlay"
+            android:textColor="@color/text_primary" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/clickGuiFabSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hud_switch_fab"
+            android:textColor="@color/text_primary" />
+
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/clickGuiSnapSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/hud_switch_snap"
+            android:textColor="@color/text_primary" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/hud_modules_label"
             android:textColor="@color/text_dim"
             android:textSize="10sp" />
 

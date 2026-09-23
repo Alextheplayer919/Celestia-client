@@ -42,9 +42,24 @@ class HudSettings(context: Context) {
         get() = prefs.getBoolean(KEY_SNAP, true)
         set(value) = prefs.edit().putBoolean(KEY_SNAP, value).apply()
 
+    /** Whether the stats panel itself is drawn. The click panel can turn it off. */
+    var statsPanelVisible: Boolean
+        get() = prefs.getBoolean(KEY_PANEL, true)
+        set(value) = prefs.edit().putBoolean(KEY_PANEL, value).apply()
+
+    /** Whether the round button is drawn. */
     var showFab: Boolean
         get() = prefs.getBoolean(KEY_FAB, true)
         set(value) = prefs.edit().putBoolean(KEY_FAB, value).apply()
+
+    /** Last position of the round button; -1 means "not moved yet, use the anchor". */
+    var fabX: Int
+        get() = prefs.getInt(KEY_FAB_X, -1)
+        set(value) = prefs.edit().putInt(KEY_FAB_X, value).apply()
+
+    var fabY: Int
+        get() = prefs.getInt(KEY_FAB_Y, -1)
+        set(value) = prefs.edit().putInt(KEY_FAB_Y, value).apply()
 
     /** Horizontal order the lines are drawn in, module ids first. */
     var order: List<String>
@@ -81,6 +96,9 @@ class HudSettings(context: Context) {
         const val KEY_OFFSET_Y = "offset_y"
         const val KEY_SNAP = "snap"
         const val KEY_FAB = "fab"
+        const val KEY_PANEL = "stats_panel"
+        const val KEY_FAB_X = "fab_x"
+        const val KEY_FAB_Y = "fab_y"
         const val KEY_ORDER = "order"
     }
 }

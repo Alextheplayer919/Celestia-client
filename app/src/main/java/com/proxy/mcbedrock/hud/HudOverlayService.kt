@@ -89,16 +89,14 @@ class HudOverlayService : Service() {
             }
         }
 
-        if (hudView == null && Settings.canDrawOverlays(this)) {
-            addHud()
-            if (settings.showFab) addFab()
-        } else if (!Settings.canDrawOverlays(this)) {
+        if (!Settings.canDrawOverlays(this)) {
             // Without the permission there is nothing to draw; say so and go away
             // rather than sitting in the notification shade doing nothing.
             Toast.makeText(this, getString(R.string.hud_permission_missing), Toast.LENGTH_LONG).show()
             stopSelf()
             return START_NOT_STICKY
         }
+        syncWindows()
 
         handler.removeCallbacks(tick)
         handler.post(tick)
@@ -147,10 +145,29 @@ class HudOverlayService : Service() {
             WindowManager.LayoutParams.WRAP_CONTENT,
             touchable = true
         )
-        attachDrag(view, params, isHud = true)
+        // A tap on the panel is the shortcut to the click panel; dragging moves it.
+        attachDrag(view, params, isHud = true) { if (menuView == null) openMenu() else closeMenu() }
         addView(view, params)
         hudView = view
         hudParams = params
+        restoreHudPosition()
+    }
+
+    /** Puts the panel back where the user left it. */
+    private fun restoreHudPosition() {
+        val view = hudView ?: return
+        val params = hudParams ?: return
+        val metrics = resources.displayMetrics
+        val (x, y) = HudLayout.anchorPosition(
+            settings.corner,
+            metrics.widthPixels,
+            metrics.heightPixels,
+            view.width.coerceAtLeast(1),
+            view.height.coerceAtLeast(1)
+        )
+        params.x = x + settings.offsetX
+        params.y = y + settings.offsetY
+        safeUpdate(view, params)
     }
 
     private fun addFab() {
@@ -158,12 +175,22 @@ class HudOverlayService : Service() {
         val size = (FAB_SIZE_DP * resources.displayMetrics.density).toInt()
         val params = baseParams(size, size, touchable = true)
         val metrics = resources.displayMetrics
-        val corner = HudCorner.BOTTOM_END
-        val (x, y) = HudLayout.anchorPosition(corner, metrics.widthPixels, metrics.heightPixels, size, size, 20, 120)
-        params.x = x
-        params.y = y
-        attachDrag(view, params, isHud = false)
-        view.setOnClickListener {
+        val (anchorX, anchorY) = HudLayout.anchorPosition(
+            HudCorner.BOTTOM_END,
+            metrics.widthPixels,
+            metrics.heightPixels,
+            size,
+            size,
+            20,
+            120
+        )
+        val savedX = settings.fabX
+        val savedY = settings.fabY
+        params.x = if (savedX >= 0) savedX else anchorX
+        params.y = if (savedY >= 0) savedY else anchorY
+
+        // Tap opens or closes the click panel; drag moves the button.
+        attachDrag(view, params, isHud = false) {
             if (menuView == null) openMenu() else closeMenu()
         }
         addView(view, params)
@@ -171,16 +198,28 @@ class HudOverlayService : Service() {
     }
 
     /**
-     * Dragging: the view follows the finger, the position is clamped on screen and —
-     * if snapping is on — settles into the nearest corner on release, which is then
-     * remembered. The window is never re-created, only moved.
+     * Drag *and* tap on the same view.
+     *
+     * The touch listener consumes the gesture, so an `OnClickListener` on the same
+     * view would never fire — which is exactly what happened to the round button
+     * before. Instead the tap is recognised here: a press that never moves beyond
+     * the touch slop counts as a tap and calls [onTap], anything else is a drag that
+     * gets clamped on screen and, by default, snaps to the nearest corner.
+     *
+     * The window is never re-created, only moved.
      */
-    private fun attachDrag(view: View, params: WindowManager.LayoutParams, isHud: Boolean) {
+    private fun attachDrag(
+        view: View,
+        params: WindowManager.LayoutParams,
+        isHud: Boolean,
+        onTap: (() -> Unit)? = null
+    ) {
         var startX = 0
         var startY = 0
         var touchX = 0f
         var touchY = 0f
         var dragged = false
+        val slop = TOUCH_SLOP_DP * resources.displayMetrics.density
 
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
@@ -195,7 +234,7 @@ class HudOverlayService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - touchX).toInt()
                     val dy = (event.rawY - touchY).toInt()
-                    if (!dragged && abs(dx) + abs(dy) > TOUCH_SLOP_DP * resources.displayMetrics.density) dragged = true
+                    if (!dragged && abs(event.rawX - touchX) + abs(event.rawY - touchY) > slop) dragged = true
                     if (dragged) {
                         val metrics = resources.displayMetrics
                         val (x, y) = HudLayout.clamp(
@@ -212,8 +251,12 @@ class HudOverlayService : Service() {
                     }
                     true
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (dragged) settle(view, params, isHud)
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragged) {
+                        settle(view, params, isHud)
+                    } else if (event.actionMasked == MotionEvent.ACTION_UP) {
+                        onTap?.invoke()
+                    }
                     true
                 }
                 else -> false
@@ -239,6 +282,9 @@ class HudOverlayService : Service() {
             settings.offsetX = 0
             settings.offsetY = 0
             settings.corner = corner
+        } else {
+            settings.fabX = position.first
+            settings.fabY = position.second
         }
     }
 
@@ -262,6 +308,32 @@ class HudOverlayService : Service() {
         }
     }
 
+    /**
+     * Adds or removes each window to match the saved settings. Everything the HUD
+     * draws is optional: the stats panel and the round button can each be turned
+     * off from the click panel, and turning both off leaves the relay running
+     * untouched.
+     */
+    private fun syncWindows() {
+        if (settings.statsPanelVisible) {
+            if (hudView == null) addHud()
+        } else if (hudView != null) {
+            removeView(hudView)
+            hudView = null
+            hudParams = null
+            hudLines = null
+            hudTitle = null
+            hudGraph = null
+        }
+
+        if (settings.showFab) {
+            if (fabView == null) addFab()
+        } else if (fabView != null) {
+            removeView(fabView)
+            fabView = null
+        }
+    }
+
     private fun removeView(view: View?) {
         if (view == null) return
         try {
@@ -282,7 +354,11 @@ class HudOverlayService : Service() {
         )
         params.x = dp(24)
         params.y = dp(96)
-        attachDrag(view, params, isHud = false)
+        // Drag by the header only: the rest of the panel must keep scrolling and
+        // letting its switches and buttons receive taps normally.
+        view.findViewById<TextView>(R.id.clickGuiTitle)?.let { header ->
+            attachDrag(header, params, isHud = false)
+        }
 
         val list = view.findViewById<LinearLayout>(R.id.clickGuiModules)
         val corners = view.findViewById<LinearLayout>(R.id.clickGuiCorners)
@@ -315,6 +391,23 @@ class HudOverlayService : Service() {
             }
             corners.addView(chip)
         }
+
+        val overlaySwitch = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.clickGuiOverlaySwitch)
+        val fabSwitch = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.clickGuiFabSwitch)
+        val snapSwitch = view.findViewById<com.google.android.material.materialswitch.MaterialSwitch>(R.id.clickGuiSnapSwitch)
+        overlaySwitch.isChecked = settings.statsPanelVisible
+        fabSwitch.isChecked = settings.showFab
+        snapSwitch.isChecked = settings.snapToCorner
+        overlaySwitch.setOnCheckedChangeListener { _, checked ->
+            settings.statsPanelVisible = checked
+            lastLineSignature = null
+            syncWindows()
+        }
+        fabSwitch.setOnCheckedChangeListener { _, checked ->
+            settings.showFab = checked
+            syncWindows()
+        }
+        snapSwitch.setOnCheckedChangeListener { _, checked -> settings.snapToCorner = checked }
 
         view.findViewById<com.google.android.material.button.MaterialButton>(R.id.clickGuiReset).setOnClickListener {
             settings.resetPositions()
