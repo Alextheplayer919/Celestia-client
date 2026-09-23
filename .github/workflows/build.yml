@@ -1,10 +1,39 @@
 name: Build
 
+# Only runs when something that can actually affect the build changes.
+#
+# Docs and repository housekeeping do not compile into the APK, so a docs-only
+# push or pull request no longer starts a job: edit a README, update docs/, or
+# push a commit that carries no code change, and nothing runs. Any change to
+# source, tests, build files, the wrapper or this workflow still triggers a build.
+#
+# Note for later: if branch protection is ever enabled here, requiring this
+# workflow would block a docs-only pull request forever ("Waiting for status to
+# be reported"), because a skipped workflow reports no status at all. The fix at
+# that point is to drop the path filters and instead gate the expensive steps
+# behind a cheap change-detection job, so the check always reports.
 on:
   push:
     branches: [ main ]
-  pull_request: {}
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
   workflow_dispatch: {}
+
+# A newer push to the same branch makes the older run pointless: cancel it.
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
