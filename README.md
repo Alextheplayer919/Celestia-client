@@ -102,6 +102,28 @@ It can also be run without Android tooling at all: copy
 `app/src/test/java/com/proxy/mcbedrock/InspectionChecks.kt` into a directory with a
 `main` that calls `InspectionChecks.runAll(verbose = true)` and compile with `kotlinc`.
 
+## Control panel
+
+The app is a small control panel rather than a debug console:
+
+- **Target server** — address and port, recent servers as chips, and **Scan
+  network** (LAN discovery) to fill them in from a world that is open to LAN. The
+  address is validated and normalised, so a pasted `raknet://host:19133/path`
+  lands in the right fields.
+- **Relay only this server** — with a target saved, the VPN routes just that
+  server's `/32` addresses, so DNS and the rest of the device never touch the
+  tunnel. Turn it off (or leave the address blank) and it falls back to relaying
+  all UDP from the selected app.
+- **Minecraft app** — pick which installed app to relay. Minecraft-like packages
+  are listed first, "show all installed apps" is opt-in, and the choice is
+  remembered. The list is obtained through a manifest `<queries>` block for
+  launcher intents, so the app needs no restricted `QUERY_ALL_PACKAGES`
+  permission.
+- **Session** — a status pill, the tunnel mode, and the live values (phase, RTT
+  min/avg/max, jitter, loss, throughput, MTU/RakNet protocol) with severity
+  colours: green/amber/red for ping and loss, phase highlighted, the version
+  comparison flagged when client and server disagree.
+
 ## What the relay can see (and what it cannot)
 
 Cleartext, and therefore reported by the UI:

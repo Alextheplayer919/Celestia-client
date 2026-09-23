@@ -54,6 +54,16 @@ data class FlowView(
 /** Aggregate state of the proxy for the UI and the notification. */
 data class ServiceStats(
     val vpnEstablished: Boolean,
+    /** `play.example.com:19132`, or empty when nothing was chosen. */
+    val targetLabel: String = "",
+    /** Human sentence describing what the tunnel captures. */
+    val scopeDescription: String = "",
+    /** True when only the target server's address is routed into the tunnel. */
+    val scopedToTarget: Boolean = false,
+    /** Addresses the target resolved to, when scoped. */
+    val resolvedAddresses: List<String> = emptyList(),
+    /** `Minecraft 1.26.40 (com.mojang.minecraftpe)`. */
+    val appDescription: String = "",
     val flows: List<FlowView>,
     val totalUpstreamBytes: Long,
     val totalDownstreamBytes: Long,

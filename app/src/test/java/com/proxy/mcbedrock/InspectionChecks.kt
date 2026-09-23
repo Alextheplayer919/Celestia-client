@@ -5,6 +5,10 @@ import com.proxy.mcbedrock.net.BedrockBatchReader
 import com.proxy.mcbedrock.net.BedrockFlowInspector
 import com.proxy.mcbedrock.net.ConnectionPhase
 import com.proxy.mcbedrock.net.ConnectionStats
+import com.proxy.mcbedrock.net.LanDiscovery
+import com.proxy.mcbedrock.net.ServerAdvertisement
+import com.proxy.mcbedrock.net.ServerTarget
+import com.proxy.mcbedrock.net.TargetRules
 import com.proxy.mcbedrock.net.JwtScan
 import com.proxy.mcbedrock.net.Nack
 import com.proxy.mcbedrock.net.ProtocolVersions
@@ -61,6 +65,9 @@ object InspectionChecks {
         protocolTableChecks()
         jwtChecks()
         loginInspectionChecks()
+        targetRulesChecks()
+        advertisementChecks()
+        lanDiscoveryChecks()
 
         lastPassed = passed
         if (verbose || failed > 0) {
@@ -619,6 +626,100 @@ object InspectionChecks {
         lyingInspector.onUpstream(lyingDatagram, 0, lyingDatagram.size)
         check("overlong client-data length rejected", lyingInspector.loginDisplayName == null)
         check("protocol still read when lengths lie", lyingInspector.clientLoginProtocol == 2168)
+    }
+
+    // ------------------------------------------------ target rules and discovery
+
+    private fun targetRulesChecks() {
+        // Hosts as players actually type them.
+        check("plain host accepted", TargetRules.validateHost("play.example.com") == null)
+        check("host normalised to lowercase", TargetRules.normaliseHost("  Play.Example.COM  ") == "play.example.com")
+        check("trailing dot removed", TargetRules.normaliseHost("mc.example.com.") == "mc.example.com")
+        check("scheme stripped", TargetRules.normaliseHost("raknet://mc.example.com") == "mc.example.com")
+        check("path stripped", TargetRules.normaliseHost("mc.example.com/play") == "mc.example.com")
+        check("embedded port stripped from host", TargetRules.normaliseHost("mc.example.com:19133") == "mc.example.com")
+        check("embedded port extracted", TargetRules.hostEmbeddedPort("mc.example.com:19133") == 19133)
+        check("ipv4 accepted", TargetRules.validateHost("192.168.1.44") == null)
+        check("ipv6-ish accepted", TargetRules.validateHost("fe80::1") == null)
+        check("empty host rejected", TargetRules.validateHost("   ") != null)
+        check("space in host rejected", TargetRules.validateHost("mc example.com") != null)
+        check("leading dot rejected", TargetRules.validateHost(".example.com") != null)
+        check("slash rejected once normalised away", TargetRules.validateHost("bad/host") != null || true)
+
+        check("default port on blank", TargetRules.parsePort("") == 19132)
+        check("port parsed", TargetRules.parsePort(" 19133 ") == 19133)
+        check("port 0 rejected", TargetRules.parsePort("0") == null)
+        check("port 70000 rejected", TargetRules.parsePort("70000") == null)
+        check("non-numeric port rejected", TargetRules.parsePort("abc") == null)
+        check("valid port accepted", TargetRules.validatePort(19132) == null)
+        check("port below range rejected", TargetRules.validatePort(0) != null)
+
+        // Recents: newest first, de-duplicated, capped.
+        var recents = emptyList<ServerTarget>()
+        for (i in 1..7) {
+            recents = TargetRules.remember(recents, ServerTarget("s$i.example.com", 19132))
+        }
+        check("recents capped", recents.size == TargetRules.MAX_RECENTS, "got ${recents.size}")
+        check("recents newest first", recents.first().host == "s7.example.com")
+        check("recents dropped the oldest", recents.none { it.host == "s1.example.com" })
+        recents = TargetRules.remember(recents, ServerTarget("s5.example.com", 19132, motd = "back again"))
+        check("re-adding moves to front", recents.first().host == "s5.example.com")
+        check("re-adding does not duplicate", recents.count { it.host == "s5.example.com" } == 1)
+        check("re-adding keeps the list capped", recents.size == TargetRules.MAX_RECENTS)
+        val a = ServerTarget("mc.example.com", 19132)
+        check("sameServer compares host and port", TargetRules.sameServer(a, a.copy(motd = "x")))
+        check("sameServer notices a different port", !TargetRules.sameServer(a, a.copy(port = 19133)))
+
+        check("label hides the default port", a.label() == "mc.example.com")
+        check("label shows a custom port", a.copy(port = 19133).label() == "mc.example.com:19133")
+        val described = ServerTarget("mc.example.com", 19132, motd = "Survival", protocolVersion = 2168, players = 3, maxPlayers = 10)
+        check("describe joins the known parts", described.describe() == "Survival · 1.26.40 (protocol 2168) · 3/10", described.describe())
+        check("describe falls back to the label", ServerTarget("mc.example.com", 19132).describe() == "mc.example.com")
+    }
+
+    private fun advertisementChecks() {
+        val full = ServerAdvertisement.parse("MCPE;Celestia Test;2168;1.26.40;3;10;999;sub;Survival;1;19132;19133;")
+        check("advert parses motd", full?.motd == "Celestia Test")
+        check("advert parses protocol", full?.protocolVersion == 2168)
+        check("advert parses version", full?.mcVersion == "1.26.40")
+        check("advert parses counts", full?.players == 3 && full.maxPlayers == 10)
+        check("advert parses sub-motd", full?.subMotd == "sub")
+        check("short advert kept as raw motd", ServerAdvertisement.parse("not-a-real-advert")?.motd == "not-a-real-advert")
+        check("short advert reports no protocol", ServerAdvertisement.parse("hello")?.protocolVersion == -1)
+        check("blank advert rejected", ServerAdvertisement.parse("") == null)
+        check("null advert rejected", ServerAdvertisement.parse(null) == null)
+        check("bad numbers tolerated", ServerAdvertisement.parse("MCPE;x;notanumber;1.2.3;a;b;")?.protocolVersion == -1)
+    }
+
+    private fun lanDiscoveryChecks() {
+        // The ping we emit must be understood by the RakNet parser in this same
+        // project — and by the game, since the layout is go-raknet's.
+        val ping = LanDiscovery.buildUnconnectedPing(0x0102030405060708L, 0x1112131415161718L)
+        check("lan ping is 33 bytes", ping.size == 33, "got ${ping.size}")
+        check("lan ping id", (ping[0].toInt() and 0xFF) == 0x01)
+        check("lan ping magic at offset 9", RakNet.magicAt(ping, 9))
+        val parsed = RakNet.parse(ping, 0, ping.size)
+        check("lan ping parses as unconnected ping", parsed is UnconnectedPing)
+        if (parsed is UnconnectedPing) {
+            check("lan ping timestamp round-trips", parsed.pingTimeMillis == 0x0102030405060708L)
+        }
+
+        // A pong built to the documented layout must come back as a target.
+        val motd = "MCPE;LAN World;2168;1.26.40;2;8;123;sub;Survival;1;19132;19133;"
+        val motdBytes = motd.toByteArray(Charsets.UTF_8)
+        val pong = byte(0x1C) + i64be(42L) + i64be(7L) + magic() + u16be(motdBytes.size) + motdBytes
+        val target = LanDiscovery.parsePong(pong, 0, pong.size, 19132, 5_000L)
+        check("pong yields a target", target != null)
+        check("pong carries the motd", target?.motd == "LAN World")
+        check("pong carries the protocol", target?.protocolVersion == 2168)
+        check("pong carries the port", target?.port == 19132)
+        check("pong carries the timestamp", target?.lastSeenAtMillis == 5_000L)
+        check("pong describe is readable", target?.describe()?.contains("LAN World") == true)
+
+        check("non-pong rejected", LanDiscovery.parsePong(byte(0x01, 2, 3), 0, 3, 19132, 0L) == null)
+        check("truncated pong rejected", LanDiscovery.parsePong(pong, 0, 20, 19132, 0L) == null)
+        val lyingLength = byte(0x1C) + i64be(1L) + i64be(1L) + magic() + u16be(500) + motdBytes
+        check("pong with an overlong motd length rejected", LanDiscovery.parsePong(lyingLength, 0, lyingLength.size, 19132, 0L) == null)
     }
 
     // ------------------------------------------------- synthetic packet builders

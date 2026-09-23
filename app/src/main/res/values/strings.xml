@@ -1,11 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Celestia</string>
+    <string name="app_subtitle">Bedrock relay · read-only</string>
 
-    <string name="notification_channel_name">Proxy status</string>
-    <string name="notification_channel_description">Shows connection statistics while the proxy is relaying Minecraft traffic.</string>
-    <string name="notification_title">Celestia proxy</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_running">Relaying</string>
+    <string name="status_waiting">Waiting for the game</string>
+    <string name="status_error">Error</string>
+
+    <string name="section_server">Target server</string>
+    <string name="section_server_hint">The relay can be scoped to one server so nothing else on the device is touched. Minecraft still connects to this address itself — pick it here, type it in the game the same way.</string>
+    <string name="field_host">Address</string>
+    <string name="field_port">Port</string>
+    <string name="action_save">Save</string>
+    <string name="action_scan_lan">Scan network</string>
+    <string name="recents_label">Recent</string>
+    <string name="switch_scope">Relay only this server</string>
+    <string name="switch_scope_hint">Routes only this server\'s address into the relay; DNS and everything else stay untouched. Turn it off to relay all of the selected app\'s UDP traffic.</string>
+
+    <string name="section_app">Minecraft app</string>
+    <string name="section_app_hint">Only this app\'s traffic is captured by the relay.</string>
+    <string name="action_change_app">Change</string>
+
+    <string name="action_start">Start relay</string>
+    <string name="action_stop">Stop</string>
+
+    <string name="section_session">Session</string>
+    <string name="no_traffic_yet">No traffic yet. Open Minecraft and join a server.</string>
+    <string name="footer_note">Read-only by design: UDP traffic is relayed unchanged and only observed. Version, account and handshake details come from the login exchange, which is cleartext; game packets are encrypted end-to-end with a key derived between the client and the server, so a relay cannot read coordinates, chat or inventory.</string>
+
+    <string name="dialog_apps_title">Choose the app to relay</string>
+    <string name="dialog_apps_search">Search apps</string>
+    <string name="dialog_apps_show_all">Show all installed apps</string>
+    <string name="dialog_apps_empty">No apps found.</string>
+
+    <string name="scan_title">Servers on this network</string>
+    <string name="scan_running">Scanning…</string>
+    <string name="scan_empty">No servers answered. Make sure a world is open to LAN or a server is running on this network.</string>
+
+    <string name="error_mc_missing">Minecraft is not installed — nothing to relay.</string>
+    <string name="error_host">Check the address</string>
+    <string name="server_saved">Saved</string>
+
+    <string name="notification_channel_name">Relay status</string>
+    <string name="notification_channel_description">Shows live connection statistics while the relay is running.</string>
+    <string name="notification_title">Celestia relay</string>
     <string name="notification_starting">Starting…</string>
-    <string name="notification_idle">Waiting for Minecraft traffic</string>
+    <string name="notification_idle">Waiting for game traffic</string>
     <string name="notification_action_stop">Stop</string>
 </resources>
