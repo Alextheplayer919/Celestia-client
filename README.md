@@ -210,8 +210,11 @@ from the reference client is in `docs/eclient-notes.md`.
 
 ## Protocol notes
 
-- Minecraft Bedrock **26.40 is protocol 2168** (`26.44` also 2168, `26.45` is 2169).
-  Preview builds of the same line report 1011.
+- **Target: Minecraft Bedrock 1.21.111 — protocol 844** (pinned; see
+  [docs/target-version.md](docs/target-version.md)). The transparent relay is
+  version-agnostic; the terminated session decodes 844.
+- For reference, current releases: **26.40 is protocol 2168** (`26.44` also 2168,
+  `26.45` is 2169). Preview builds of the same line report 1011.
 - RakNet wire details used here (packet ids, the unconnected magic, frame/reliability
   encoding, ACK/NACK records, and the little-endian 24-bit datagram sequence numbers)
   were verified against `Sandertv/go-raknet`, the reference implementation.
